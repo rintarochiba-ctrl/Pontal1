@@ -4,5 +4,5 @@ info:
   description: 社内ポータルシステム Pontal のAPI仕様
   version: 0.0.1
 servers:
-  - url: http://localhost:8090
+  - url: http://localhost:8092
 paths: {}
