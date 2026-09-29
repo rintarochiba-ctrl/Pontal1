@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pontal1_postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: pontal
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TZ: Asia/Tokyo
+    volumes:
+      - pontal1_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pontal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    container_name: pontal1_app
+    ports:
+      - "8092:8090"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://pontal1_postgres:5432/pontal
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  swagger-editor:
+    # v4: SWAGGER_FILE でローカル定義を自動読込（v5 は未対応）
+    image: swaggerapi/swagger-editor:v4.14.6
+    container_name: pontal1_swagger_editor
+    ports:
+      - "8093:8080"
+    volumes:
+      - ./openapi/openapi.yaml:/tmp/openapi.yaml:ro
+    environment:
+      SWAGGER_FILE: /tmp/openapi.yaml
+
+volumes:
+  pontal1_postgres_data:
