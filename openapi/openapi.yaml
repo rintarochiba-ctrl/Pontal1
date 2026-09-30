@@ -5,4 +5,703 @@ info:
   version: 0.0.1
 servers:
   - url: http://localhost:8092
-paths: {}
+tags:
+  - name: me
+    description: ログインユーザー情報
+  - name: employees
+    description: 社員管理
+  - name: salary-slips
+    description: 給与明細
+  - name: salary-upload-batches
+    description: 給与明細アップロード履歴
+  - name: audit-log-batches
+    description: 監査ログエクスポート
+paths:
+  /api/me:
+    get:
+      tags: [me]
+      summary: ログインユーザー情報取得
+      description: セッション中の社員ID・権限(isSystemAdmin/isHrAdmin)を取得する
+      operationId: getMe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/employees:
+    get:
+      tags: [employees]
+      summary: 社員一覧取得
+      description: 登録済み社員の一覧を検索・ページングして取得する
+      operationId: listEmployees
+      parameters:
+        - name: page
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+        - name: size
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [employees]
+      summary: 社員登録
+      description: >-
+        新規社員を登録する(システム管理者のみ)。
+        認証はCognitoで管理するため、登録時にCognitoユーザーの作成とemployee.cognito_subへの紐付けが必要。
+        initialPasswordはCognitoユーザー作成用の初期パスワードとして扱う。
+      operationId: createEmployee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeCreateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/employees/{id}:
+    get:
+      tags: [employees]
+      summary: 社員詳細取得
+      description: 特定社員のプロフィール詳細を取得する(isHrAdminには給与明細への導線を表示)
+      operationId: getEmployee
+      parameters:
+        - $ref: "#/components/parameters/EmployeeId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [employees]
+      summary: 社員編集
+      description: 社員情報・ロールを編集する(システム管理者のみ)
+      operationId: updateEmployee
+      parameters:
+        - $ref: "#/components/parameters/EmployeeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeUpdateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [employees]
+      summary: 社員削除
+      description: 社員を削除する(システム管理者のみ、自分自身は削除不可)
+      operationId: deleteEmployee
+      parameters:
+        - $ref: "#/components/parameters/EmployeeId"
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/employees/{employeeId}/salary-slips:
+    get:
+      tags: [salary-slips]
+      summary: 給与明細一覧取得
+      description: 自分(isHrAdminは指定社員)の給与明細を年月ごとに一覧取得する
+      operationId: listSalarySlips
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalarySlipSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/salary-slips/{slipId}/download:
+    get:
+      tags: [salary-slips]
+      summary: 給与明細ダウンロード
+      description: 給与明細PDFをダウンロードする。成功時、監査ログにDOWNLOADを記録する。
+      operationId: downloadSalarySlip
+      parameters:
+        - name: slipId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/salary-slips/upload:
+    post:
+      tags: [salary-slips]
+      summary: 給与明細アップロード
+      description: >-
+        CSVと複数PDFを一括アップロードし給与明細を登録する(isHrAdminのみ、非同期処理)。
+        成功時、監査ログにCREATEを記録する。
+      operationId: uploadSalarySlips
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [payMonth, csvFile, pdfFiles]
+              properties:
+                payMonth:
+                  type: string
+                  pattern: "^\\d{4}-\\d{2}$"
+                  description: 支給年月(YYYY-MM)
+                csvFile:
+                  type: string
+                  format: binary
+                  description: 社員ID⇔ファイル名の紐付けCSV
+                pdfFiles:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: 拡張子.pdf必須、合計サイズ上限あり
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalaryUploadAcceptedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/salary-slips/{slipId}:
+    delete:
+      tags: [salary-slips]
+      summary: 給与明細削除
+      description: 誤って登録した給与明細を削除する(isHrAdminのみ)。成功時、監査ログにDELETEを記録する。
+      operationId: deleteSalarySlip
+      parameters:
+        - name: slipId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: No Content
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/salary-upload-batches:
+    get:
+      tags: [salary-upload-batches]
+      summary: アップロード履歴一覧取得
+      description: アップロードバッチの実行結果(ステータス・件数)を一覧取得する(isHrAdminのみ)
+      operationId: listSalaryUploadBatches
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalaryUploadBatch"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/salary-upload-batches/{batchId}:
+    get:
+      tags: [salary-upload-batches]
+      summary: アップロード履歴詳細取得
+      description: 特定バッチの失敗行と理由を取得する(isHrAdminのみ)
+      operationId: getSalaryUploadBatch
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalaryUploadBatchDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/audit-log-batches:
+    get:
+      tags: [audit-log-batches]
+      summary: 監査ログエクスポート一覧取得
+      description: 給与明細・評価データの閲覧/DL履歴のエクスポートバッチ一覧を取得する(システム管理者のみ)
+      operationId: listAuditLogBatches
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogExportBatch"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/audit-log-batches/{batchId}/download:
+    get:
+      tags: [audit-log-batches]
+      summary: 監査ログエクスポートダウンロード
+      description: 監査ログエクスポート結果をダウンロードする。成功時、監査ログに記録する。
+      operationId: downloadAuditLogBatch
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  parameters:
+    EmployeeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    BadRequest:
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    Me:
+      type: object
+      properties:
+        employeeId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        isSystemAdmin:
+          type: boolean
+        isHrAdmin:
+          type: boolean
+
+    EmployeeSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        department:
+          type: string
+        position:
+          type: string
+
+    EmployeePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmployeeSummary"
+        totalCount:
+          type: integer
+        next:
+          type: integer
+          nullable: true
+          description: 次ページ番号(存在しない場合はnull)
+        prev:
+          type: integer
+          nullable: true
+          description: 前ページ番号(存在しない場合はnull)
+
+    EmployeeDetail:
+      type: object
+      description: >-
+        社員詳細。社員編集API(EmployeeUpdateRequest)の入力項目を初期表示できるよう、
+        DB設計上のプロフィール項目を全て含む。
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        department:
+          type: string
+        position:
+          type: string
+        joinDate:
+          type: string
+          format: date
+        gender:
+          type: string
+        age:
+          type: integer
+        birthplace:
+          type: string
+        imageUrl:
+          type: string
+        bio:
+          type: string
+        hobby:
+          type: string
+        selfQa:
+          type: string
+        isSystemAdmin:
+          type: boolean
+        isHrAdmin:
+          type: boolean
+
+    EmployeeCreateRequest:
+      type: object
+      required: [name, email, initialPassword, department]
+      properties:
+        name:
+          type: string
+          maxLength: 50
+        email:
+          type: string
+          format: email
+        initialPassword:
+          type: string
+          description: Cognitoユーザー作成用の初期パスワード
+        joinDate:
+          type: string
+          format: date
+        department:
+          type: string
+          maxLength: 50
+        position:
+          type: string
+          maxLength: 50
+        isSystemAdmin:
+          type: boolean
+          default: false
+        isHrAdmin:
+          type: boolean
+          default: false
+
+    EmployeeUpdateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 50
+        gender:
+          type: string
+          maxLength: 10
+        age:
+          type: integer
+        birthplace:
+          type: string
+          maxLength: 50
+        joinDate:
+          type: string
+          format: date
+        department:
+          type: string
+          maxLength: 50
+        position:
+          type: string
+          maxLength: 50
+        image:
+          type: string
+          format: binary
+        bio:
+          type: string
+        hobby:
+          type: string
+          maxLength: 255
+        selfQa:
+          type: string
+        isSystemAdmin:
+          type: boolean
+        isHrAdmin:
+          type: boolean
+
+    SalarySlipSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        payMonth:
+          type: string
+          pattern: "^\\d{4}-\\d{2}$"
+
+    SalaryUploadAcceptedResponse:
+      type: object
+      properties:
+        batchId:
+          type: integer
+          format: int64
+        status:
+          $ref: "#/components/schemas/SalaryUploadBatchStatus"
+
+    SalaryUploadBatchStatus:
+      type: string
+      enum: [PROCESSING, COMPLETED, PARTIALLY_FAILED, FAILED]
+
+    SalaryUploadBatch:
+      type: object
+      properties:
+        batchId:
+          type: integer
+          format: int64
+        payMonth:
+          type: string
+          pattern: "^\\d{4}-\\d{2}$"
+        uploadedBy:
+          type: integer
+          format: int64
+        status:
+          $ref: "#/components/schemas/SalaryUploadBatchStatus"
+        successCount:
+          type: integer
+        failureCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    SalaryUploadBatchError:
+      type: object
+      properties:
+        rowNumber:
+          type: integer
+        employeeId:
+          type: integer
+          format: int64
+          nullable: true
+          description: CSV上の社員IDが不明な場合はnull
+        filename:
+          type: string
+        errorMessage:
+          type: string
+
+    SalaryUploadBatchDetail:
+      allOf:
+        - $ref: "#/components/schemas/SalaryUploadBatch"
+        - type: object
+          properties:
+            errors:
+              type: array
+              items:
+                $ref: "#/components/schemas/SalaryUploadBatchError"
+
+    AuditLogExportBatchStatus:
+      type: string
+      enum: [PROCESSING, COMPLETED, FAILED]
+
+    AuditLogExportBatch:
+      type: object
+      properties:
+        batchId:
+          type: integer
+          format: int64
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        status:
+          $ref: "#/components/schemas/AuditLogExportBatchStatus"
+        recordCount:
+          type: integer
