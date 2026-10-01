@@ -61,6 +61,13 @@
             <scope>runtime</scope>
             <optional>true</optional>
         </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.28.11</version>
+        </dependency>
+
     </dependencies>
 
     <build>
