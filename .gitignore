@@ -1,3 +1,4 @@
 *.md
 !.github/**/*.md
 target/
+.mcp.json
