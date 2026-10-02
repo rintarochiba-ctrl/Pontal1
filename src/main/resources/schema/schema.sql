@@ -23,3 +23,14 @@ CREATE TABLE IF NOT EXISTS employee (
     created_at       TIMESTAMP NOT NULL DEFAULT now(),
     updated_at       TIMESTAMP NOT NULL DEFAULT now()
 );
+
+-- 給与明細PDF本体テーブル（1件ずつ同期アップロードする仕様のため、バッチ管理テーブルは無し）
+CREATE TABLE IF NOT EXISTS salary_slip (
+    id              BIGSERIAL PRIMARY KEY,
+    employee_id     BIGINT NOT NULL REFERENCES employee(id),
+    pay_month       VARCHAR(7) NOT NULL,
+    file_path       VARCHAR(255) NOT NULL,
+    uploaded_by     BIGINT NOT NULL REFERENCES employee(id),
+    uploaded_at     TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (employee_id, pay_month)
+);
