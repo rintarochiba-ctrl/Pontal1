@@ -18,6 +18,8 @@
 
     <properties>
         <java.version>17</java.version>
+        <!-- 新しいDocker Engineに接続できるよう、Spring Boot管理のバージョン(1.19.7)を上書き -->
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencies>
@@ -55,6 +57,33 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- ControllerテストでJWT認証済みの状態を再現する -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- MapperのSQLテスト用(@MybatisTest) -->
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter-test</artifactId>
+            <version>3.0.3</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- テスト時にDocker上で本物のPostgreSQLを起動する -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-devtools</artifactId>
@@ -65,6 +94,13 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
+            <version>2.28.11</version>
+        </dependency>
+
+        <!-- Cognitoのユーザー作成・無効化(Admin API)用 -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cognitoidentityprovider</artifactId>
             <version>2.28.11</version>
         </dependency>
 

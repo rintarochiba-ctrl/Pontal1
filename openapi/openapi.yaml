@@ -35,25 +35,30 @@ paths:
     get:
       tags: [employees]
       summary: 社員一覧取得
-      description: 登録済み社員の一覧を検索・ページングして取得する
+      description: >-
+        登録済み社員(論理削除済みを除く)の一覧を検索・ページングして取得する。
+        該当なし・範囲外のページを指定した場合も200で空配列を返す。
       operationId: listEmployees
       parameters:
         - name: page
           in: query
-          required: true
+          required: false
           schema:
             type: integer
             minimum: 0
+            default: 0
         - name: size
           in: query
-          required: true
+          required: false
           schema:
             type: integer
             minimum: 1
             maximum: 100
+            default: 20
         - name: keyword
           in: query
           required: false
+          description: 名前・メールアドレス・部署の部分一致(大文字小文字を区別しない)
           schema:
             type: string
       responses:
@@ -63,10 +68,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeePage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
     post:
       tags: [employees]
       summary: 社員登録
@@ -119,7 +124,9 @@ paths:
     put:
       tags: [employees]
       summary: 社員編集
-      description: 社員情報・ロールを編集する(システム管理者のみ)
+      description: >-
+        社員情報・ロールを編集する(システム管理者のみ)。全項目を丸ごと置き換える。
+        権限チェックは存在チェックより先に行うため、権限が無い場合は対象が存在しなくても403を返す。
       operationId: updateEmployee
       parameters:
         - $ref: "#/components/parameters/EmployeeId"
@@ -147,7 +154,9 @@ paths:
     delete:
       tags: [employees]
       summary: 社員削除
-      description: 社員を削除する(システム管理者のみ、自分自身は削除不可)
+      description: >-
+        社員を論理削除する(システム管理者のみ)。自分自身を削除しようとした場合は403を返す。
+        権限チェックは存在チェックより先に行う。
       operationId: deleteEmployee
       parameters:
         - $ref: "#/components/parameters/EmployeeId"
@@ -524,7 +533,7 @@ components:
 
     EmployeeCreateRequest:
       type: object
-      required: [name, email, initialPassword, department]
+      required: [name, email, initialPassword, joinDate, department]
       properties:
         name:
           type: string
@@ -532,9 +541,12 @@ components:
         email:
           type: string
           format: email
+          maxLength: 255
         initialPassword:
           type: string
-          description: Cognitoユーザー作成用の初期パスワード
+          description: >-
+            Cognitoユーザー作成用の初期(仮)パスワード。DBには保存しない。
+            パスワードポリシーを満たさない場合は400。本人は初回ログイン時に変更する必要がある。
         joinDate:
           type: string
           format: date
@@ -553,7 +565,7 @@ components:
 
     EmployeeUpdateRequest:
       type: object
-      required: [name]
+      required: [name, joinDate, isSystemAdmin, isHrAdmin]
       properties:
         name:
           type: string
@@ -563,6 +575,8 @@ components:
           maxLength: 10
         age:
           type: integer
+          minimum: 0
+          maximum: 150
         birthplace:
           type: string
           maxLength: 50
@@ -577,7 +591,8 @@ components:
           maxLength: 50
         image:
           type: string
-          format: binary
+          maxLength: 255
+          description: 画像のS3オブジェクトキー(DBのimage_urlに保存される)
         bio:
           type: string
         hobby:
@@ -587,8 +602,10 @@ components:
           type: string
         isSystemAdmin:
           type: boolean
+          description: 必須(省略すると権限が黙って外れるのを防ぐため)
         isHrAdmin:
           type: boolean
+          description: 必須
 
     SalarySlipSummary:
       type: object

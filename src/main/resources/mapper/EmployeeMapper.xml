@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.pontal.mapper.EmployeeMapper">
+
+    <!-- ログイン社員取得(論理削除済みは除外) -->
+    <select id="findByCognitoSub" resultType="com.example.pontal.dto.LoginEmployee">
+        SELECT id AS employee_id, name, is_system_admin, is_hr_admin
+        FROM employee
+        WHERE cognito_sub = #{cognitoSub}
+          AND is_delete = FALSE
+    </select>
+
+        <!-- 社員詳細取得(論理削除済みは除外) -->
+    <select id="findDetailById" resultType="com.example.pontal.dto.EmployeeDetail">
+        SELECT id, name, email, department, position, join_date, gender, age,
+               birthplace, image_url, bio, hobby, self_qa, is_system_admin, is_hr_admin
+        FROM employee
+        WHERE id = #{id}
+          AND is_delete = FALSE
+    </select>
+
+        <!-- 一覧と件数で共通の検索条件(論理削除除外 + keywordで名前・メール・部署を部分一致) -->
+    <sql id="searchCondition">
+        WHERE is_delete = FALSE
+        <if test="keyword != null and keyword != ''">
+            AND (name ILIKE CONCAT('%', #{keyword}, '%')
+              OR email ILIKE CONCAT('%', #{keyword}, '%')
+              OR department ILIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+    </sql>
+
+    <!-- 社員一覧(サマリーのみ) -->
+    <select id="selectByKeyword" resultType="com.example.pontal.dto.EmployeeSummary">
+        SELECT id, name, email, department, position
+        FROM employee
+        <include refid="searchCondition"/>
+        ORDER BY id
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <!-- 社員一覧の総件数 -->
+    <select id="countByKeyword" resultType="int">
+        SELECT COUNT(*)
+        FROM employee
+        <include refid="searchCondition"/>
+    </select>
+
+        <!-- 社員編集(論理削除済みは対象外、更新日時も更新) -->
+    <update id="update">
+        UPDATE employee
+        SET name = #{req.name},
+            gender = #{req.gender},
+            age = #{req.age},
+            birthplace = #{req.birthplace},
+            join_date = #{req.joinDate},
+            department = #{req.department},
+            position = #{req.position},
+            image_url = #{req.image},
+            bio = #{req.bio},
+            hobby = #{req.hobby},
+            self_qa = #{req.selfQa},
+            is_system_admin = #{req.isSystemAdmin},
+            is_hr_admin = #{req.isHrAdmin},
+            updated_at = now()
+        WHERE id = #{id}
+          AND is_delete = FALSE
+    </update>
+
+    <!-- メール重複チェック(論理削除済みも含める) -->
+    <select id="countByEmail" resultType="int">
+        SELECT COUNT(*)
+        FROM employee
+        WHERE email = #{email}
+    </select>
+
+    <!-- 社員登録(INSERT ... RETURNING idで、登録した行のidを受け取る) -->
+    <select id="insert" resultType="long">
+        INSERT INTO employee (name, email, cognito_sub, department, position,
+                              join_date, is_system_admin, is_hr_admin)
+        VALUES (#{req.name}, #{req.email}, #{cognitoSub}, #{req.department}, #{req.position},
+                #{req.joinDate}, #{req.isSystemAdmin}, #{req.isHrAdmin})
+        RETURNING id
+    </select>
+
+    <!-- 社員のcognito_sub取得(論理削除済みも対象。削除直後にCognitoを無効化するため) -->
+    <select id="findCognitoSubById" resultType="string">
+        SELECT cognito_sub
+        FROM employee
+        WHERE id = #{id}
+    </select>
+
+    <!-- 社員削除(論理削除。給与明細・監査ログの履歴を残すため物理削除しない) -->
+    <update id="softDeleteById">
+        UPDATE employee
+        SET is_delete = TRUE,
+            updated_at = now()
+        WHERE id = #{id}
+          AND is_delete = FALSE
+    </update>
+
+</mapper>
