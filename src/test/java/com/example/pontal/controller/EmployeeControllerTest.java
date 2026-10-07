@@ -100,26 +100,26 @@ class EmployeeControllerTest {
 
     @Test
     void list_usesDefaultPageAndSize() throws Exception {
-        when(employeeService.search(0, 20, null)).thenReturn(new EmployeePage());
+        when(employeeService.list(0, 20, null)).thenReturn(new EmployeePage());
 
         mockMvc.perform(get("/api/employees").with(admin()))
                 .andExpect(status().isOk());
-        verify(employeeService).search(0, 20, null);//未指定ならpage=0,size=20
+        verify(employeeService).list(0, 20, null);//未指定ならpage=0,size=20
     }
 
     @Test
     void list_passesQueryParametersToService() throws Exception {
-        when(employeeService.search(1, 2, "人事")).thenReturn(new EmployeePage());
+        when(employeeService.list(1, 2, "人事")).thenReturn(new EmployeePage());
 
         mockMvc.perform(get("/api/employees").with(admin())
                 .param("page", "1").param("size", "2").param("keyword", "人事"))
                 .andExpect(status().isOk());
-        verify(employeeService).search(1, 2, "人事");
+        verify(employeeService).list(1, 2, "人事");
     }
 
     @Test
     void list_returns400_whenServiceRejectsParameters() throws Exception {
-        when(employeeService.search(0, 0, null)).thenThrow(new ValidationException("sizeは1〜100で指定してください"));
+        when(employeeService.list(0, 0, null)).thenThrow(new ValidationException("sizeは1〜100で指定してください"));
 
         mockMvc.perform(get("/api/employees").with(admin()).param("size", "0"))
                 .andExpect(status().isBadRequest())

@@ -5,6 +5,7 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import com.example.pontal.dto.SalarySlipSummary;
+import com.example.pontal.dto.SalarySlipUploadHistory;
 
 //給与明細のDBアクセスMapper
 public interface SalarySlipMapper {
@@ -32,4 +33,9 @@ public interface SalarySlipMapper {
     //アップロード時に使用、登録・更新後にレスポンスにIDを含める
     Long findIdByEmployeeAndMonth(@Param("employeeId") Long employeeId, @Param("payMonth") String payMonth);
 
+    //ダウンロードの権限チェックで使用、明細の社員IDを取得、なければnullを返す
+    Long findEmployeeIdById(@Param("slipId") Long slipId);
+
+    //アップロード履歴一覧で使用、新しい順。offsetはスキップする件数
+    List<SalarySlipUploadHistory> selectHistory(@Param("size") int size, @Param("offset") long offset);
 }

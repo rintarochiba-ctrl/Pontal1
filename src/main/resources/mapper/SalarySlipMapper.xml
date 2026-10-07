@@ -56,5 +56,19 @@
         WHERE id = #{slipId}
     </delete>
 
+    <!-- 明細の社員IDを取得、なければnullを返す -->
+    <select id="findEmployeeIdById" resultType="long">
+        SELECT employee_id
+        FROM salary_slip
+        WHERE id = #{slipId}
+    </select>
+
+    <!-- アップロード履歴一覧、新しい順 -->
+    <select id="selectHistory" resultType="com.example.pontal.dto.SalarySlipUploadHistory">
+        SELECT id AS slip_id, employee_id, pay_month, uploaded_by, uploaded_at
+        FROM salary_slip
+        ORDER BY uploaded_at DESC, id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
 </mapper>
 
