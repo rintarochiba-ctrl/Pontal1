@@ -11,6 +11,9 @@ services:
       TZ: Asia/Tokyo
     volumes:
       - pontal1_postgres_data:/var/lib/postgresql/data
+      # 空のDBが初めて作られるときだけ、番号順に1回実行される(テーブル作成 → 開発用ダミーデータ)
+      - ./src/main/resources/schema/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./docker/dev-seed.sql:/docker-entrypoint-initdb.d/02-dev-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d pontal"]
       interval: 5s
