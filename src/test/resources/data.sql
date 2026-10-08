@@ -1,5 +1,6 @@
--- テスト用dummy
-TRUNCATE TABLE employee RESTART IDENTITY CASCADE;
+-- テスト専用のダミーデータ(SQLのテストで、schema.sqlの後に流れる)
+-- テストはテストごとに新しいPostgreSQL(Testcontainers)を起動するため、データを消す処理(TRUNCATE)は不要
+-- アプリ本体の起動では流れない(開発用のダミーデータは docker/dev-seed.sql)
 
 INSERT INTO employee
     (name, email, cognito_sub, department, position, join_date, gender, age, birthplace, is_system_admin, is_hr_admin, bio, hobby)

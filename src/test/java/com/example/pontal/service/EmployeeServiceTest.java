@@ -31,12 +31,14 @@ import com.example.pontal.dto.EmployeeSummary;
 import com.example.pontal.dto.EmployeeUpdateRequest;
 import com.example.pontal.dto.LoginEmployee;
 import com.example.pontal.exception.ConflictException;
+import com.example.pontal.exception.ExternalServiceException;
 import com.example.pontal.exception.ForbiddenException;
 import com.example.pontal.exception.NotFoundException;
 import com.example.pontal.exception.UnauthorizedException;
 import com.example.pontal.exception.ValidationException;
 import com.example.pontal.mapper.EmployeeMapper;
 
+import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminCreateUserRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminCreateUserResponse;
@@ -294,16 +296,31 @@ class EmployeeServiceTest {
     }
 
     @Test
-    void delete_succeeds_evenWhenCognitoDisableFails() {
+    void delete_succeeds_whenUserDoesNotExistInCognito() {
         loginAsAdmin();
         when(employeeMapper.softDeleteById(3L)).thenReturn(1);
         when(employeeMapper.findCognitoSubById(3L)).thenReturn("dummy-sub");
-        //Cognitoに存在しないユーザー(ダミーデータなど)の場合
+        //Cognitoに存在しないユーザー(ダミーデータなど)の場合。無効化する相手がいないので成功扱い
         when(cognitoClient.adminDisableUser(any(AdminDisableUserRequest.class)))
                 .thenThrow(UserNotFoundException.builder().message("not found").build());
 
-        //DBの削除は成功しているので、例外にはしない
         assertThatCode(() -> employeeService.delete("sub-admin", 3L)).doesNotThrowAnyException();
+        verify(employeeMapper).softDeleteById(3L);
+    }
+
+    @Test
+    void delete_throwsError_whenCognitoDisableFailsForOtherReasons() {
+        loginAsAdmin();
+        when(employeeMapper.softDeleteById(3L)).thenReturn(1);
+        when(employeeMapper.findCognitoSubById(3L)).thenReturn("real-sub");
+        //権限エラーや通信エラーなど、「ユーザーがいない」以外の失敗
+        when(cognitoClient.adminDisableUser(any(AdminDisableUserRequest.class)))
+                .thenThrow(SdkClientException.create("network error"));
+
+        //成功扱いにせず、エラーで管理者に知らせる(DBの論理削除は済んでいる)
+        assertThatThrownBy(() -> employeeService.delete("sub-admin", 3L))
+                .isInstanceOf(ExternalServiceException.class)
+                .hasMessageContaining("Cognitoの無効化に失敗しました");
         verify(employeeMapper).softDeleteById(3L);
     }
 
@@ -402,5 +419,58 @@ class EmployeeServiceTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("DB error");//元の例外はそのまま呼び出し元へ
         verify(cognitoClient).adminDeleteUser(any(AdminDeleteUserRequest.class));//作ったCognitoユーザーを消している
+    }
+
+    @Test
+    void create_doesNotDeleteCognitoUser_whenFailingAfterInsert() {
+        loginAsAdmin();
+        EmployeeCreateRequest request = createRequest();
+        when(employeeMapper.countByEmail(any())).thenReturn(0);
+        when(cognitoClient.adminCreateUser(any(AdminCreateUserRequest.class))).thenReturn(cognitoCreated("new-sub"));
+        when(employeeMapper.insert(request, "new-sub")).thenReturn(10L);
+        //INSERTは成功したが、登録した社員を読み直せなかった場合
+        when(employeeMapper.findDetailById(10L)).thenReturn(null);
+
+        assertThatThrownBy(() -> employeeService.create("sub-admin", request))
+                .isInstanceOf(NotFoundException.class);
+        //DBには行が残っているので、Cognitoのユーザーを消してはいけない(消すとDBだけ残って不整合になる)
+        verify(cognitoClient, never()).adminDeleteUser(any(AdminDeleteUserRequest.class));
+    }
+
+    @Test
+    void create_deletesCognitoUser_whenSubIsMissingInResponse() {
+        loginAsAdmin();
+        when(employeeMapper.countByEmail(any())).thenReturn(0);
+        //Cognitoは、ユーザーを作ったが、応答にsubが入っていなかった場合
+        AdminCreateUserResponse noSub = AdminCreateUserResponse.builder()
+                .user(UserType.builder().attributes(AttributeType.builder().name("email").value("new@example.com").build()).build())
+                .build();
+        when(cognitoClient.adminCreateUser(any(AdminCreateUserRequest.class))).thenReturn(noSub);
+
+        assertThatThrownBy(() -> employeeService.create("sub-admin", createRequest()))
+                .isInstanceOf(IllegalStateException.class);
+        verify(employeeMapper, never()).insert(any(), any());//subが無いのでDBには登録しない
+        verify(cognitoClient).adminDeleteUser(any(AdminDeleteUserRequest.class));//作ったCognitoユーザーは消す
+    }
+
+    @Test
+    void create_keepsOriginalError_whenCognitoRollbackAlsoFails() {
+        loginAsAdmin();
+        EmployeeCreateRequest request = createRequest();
+        when(employeeMapper.countByEmail(any())).thenReturn(0);
+        when(cognitoClient.adminCreateUser(any(AdminCreateUserRequest.class))).thenReturn(cognitoCreated("new-sub"));
+        when(employeeMapper.insert(any(), any())).thenThrow(new RuntimeException("DB error"));
+        //巻き戻し(Cognitoユーザーの削除)も失敗する場合
+        when(cognitoClient.adminDeleteUser(any(AdminDeleteUserRequest.class)))
+                .thenThrow(SdkClientException.create("network error"));
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(
+                () -> employeeService.create("sub-admin", request));
+
+        //外に出るのは、もともとのエラー(DBのエラー)。巻き戻しの失敗で、原因が分からなくならない
+        assertThat(thrown).isInstanceOf(RuntimeException.class).hasMessage("DB error");
+        //巻き戻しの失敗は、付け足されて残っている
+        assertThat(thrown.getSuppressed()).hasSize(1);
+        assertThat(thrown.getSuppressed()[0]).isInstanceOf(SdkClientException.class);
     }
 }
