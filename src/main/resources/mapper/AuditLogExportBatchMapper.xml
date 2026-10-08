@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.pontal.mapper.AuditLogExportBatchMapper">
+
+    <!-- 取得で共通の列 -->
+    <sql id="batchColumns">
+        id, period_start, period_end, status, record_count, file_path, error_message, created_at, completed_at
+    </sql>
+
+    <!-- その週のバッチ(なければnull) -->
+    <select id="findByPeriodStart" resultType="com.example.pontal.dto.AuditLogExportBatch">
+        SELECT <include refid="batchColumns"/>
+        FROM audit_log_export_batch
+        WHERE period_start = #{periodStart}
+    </select>
+
+    <!-- バッチIDで取得(なければnull) -->
+    <select id="findById" resultType="com.example.pontal.dto.AuditLogExportBatch">
+        SELECT <include refid="batchColumns"/>
+        FROM audit_log_export_batch
+        WHERE id = #{id}
+    </select>
+
+    <!-- 週の開始日が範囲内のバッチを、開始日の古い順に -->
+    <select id="selectByPeriodStartBetween" resultType="com.example.pontal.dto.AuditLogExportBatch">
+        SELECT <include refid="batchColumns"/>
+        FROM audit_log_export_batch
+        WHERE period_start &gt;= #{fromDate}
+          AND period_start &lt; #{toDate}
+        ORDER BY period_start
+    </select>
+
+    <!-- 新しい週のバッチを処理中で登録(statusはDEFAULT 'PROCESSING')。INSERT ... RETURNING idでidを受け取る -->
+    <select id="insertProcessing" resultType="long">
+        INSERT INTO audit_log_export_batch (period_start, period_end)
+        VALUES (#{periodStart}, #{periodEnd})
+        RETURNING id
+    </select>
+
+    <!-- 失敗した週のやり直し。処理中に戻し、前回の原因と完了日時を消す -->
+    <update id="resetToProcessing">
+        UPDATE audit_log_export_batch
+        SET status = 'PROCESSING',
+            error_message = NULL,
+            completed_at = NULL
+        WHERE id = #{id}
+    </update>
+
+    <!-- 成功 -->
+    <update id="markCompleted">
+        UPDATE audit_log_export_batch
+        SET status = 'COMPLETED',
+            record_count = #{recordCount},
+            file_path = #{filePath},
+            error_message = NULL,
+            completed_at = now()
+        WHERE id = #{id}
+    </update>
+
+    <!-- 失敗 -->
+    <update id="markFailed">
+        UPDATE audit_log_export_batch
+        SET status = 'FAILED',
+            error_message = #{errorMessage},
+            completed_at = now()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

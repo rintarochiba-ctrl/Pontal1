@@ -51,7 +51,8 @@ class SalarySlipMapperTest {
 
     //明細を1件登録して、そのidを返す(アップロード者は山田=1)
     private Long insertSlip(Long employeeId, String payMonth) {
-        salarySlipMapper.insert(employeeId, payMonth, "salary-slips/" + payMonth + "/employee-" + employeeId + ".pdf", 1L);
+        salarySlipMapper.insert(employeeId, payMonth,
+                "salary-slips/employee-" + employeeId + "/" + payMonth.replace("-", "/") + ".pdf", 1L);
         return salarySlipMapper.findIdByEmployeeAndMonth(employeeId, payMonth);
     }
 
@@ -118,7 +119,7 @@ class SalarySlipMapperTest {
     void findFilePathById_returnsPath_orNullWhenNotFound() {
         Long id = insertSlip(4L, "2026-10");
 
-        assertThat(salarySlipMapper.findFilePathById(id)).isEqualTo("salary-slips/2026-10/employee-4.pdf");
+        assertThat(salarySlipMapper.findFilePathById(id)).isEqualTo("salary-slips/employee-4/2026/10.pdf");
         assertThat(salarySlipMapper.findFilePathById(999L)).isNull();
     }
 
