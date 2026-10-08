@@ -16,6 +16,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -101,6 +104,120 @@ class SalarySlipServiceTest {
         verifyNoInteractions(s3Client);//S3にも触れない
     }
 
+    // payMonthはS3のパスの一部になるので、YYYY-MM(月は01〜12)以外は400で止める
+    @ParameterizedTest
+    @ValueSource(strings = { "2026-13", "2026-00", "2026-1", "26-10", "202610", "2026/10", "abc", "../x", "2026-10 ", " ", "" })
+    void upload_throws400_whenPayMonthFormatIsInvalid(String invalidPayMonth) {
+        loginAsHr();
+
+        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 4L, invalidPayMonth, false, pdf()))
+                .isInstanceOf(ValidationException.class);
+        //不正な値は、DBにもS3にも届かない
+        verifyNoInteractions(salarySlipMapper);
+        verifyNoInteractions(s3Client);
+    }
+
+    @Test
+    void upload_throws403_beforeValidatingPayMonth() {
+        loginAsMember();
+
+        //権限が無い人には、入力の不備(400)ではなく、先に403を返す
+        assertThatThrownBy(() -> salarySlipService.upload("sub-member", 4L, "abc", false, pdf()))
+                .isInstanceOf(ForbiddenException.class);
+    }
+
+    // ファイルは、中身があり、拡張子が.pdfのものだけを受け付ける。それ以外は400で止める
+    @ParameterizedTest
+    @ValueSource(strings = { "slip.txt", "slip.docx", "slip.pdf.exe", "slip", "pdf", "" })
+    void upload_throws400_whenFileIsNotPdf(String fileName) {
+        loginAsHr();
+        MockMultipartFile notPdf = new MockMultipartFile("file", fileName, "application/octet-stream", "content".getBytes());
+
+        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 4L, "2026-10", false, notPdf))
+                .isInstanceOf(ValidationException.class);
+        verifyNoInteractions(salarySlipMapper);
+        verifyNoInteractions(s3Client);//PDF以外はS3に保存しない
+    }
+
+    @Test
+    void upload_throws400_whenFileIsEmpty() {
+        loginAsHr();
+        MockMultipartFile empty = new MockMultipartFile("file", "slip.pdf", "application/pdf", new byte[0]);
+
+        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 4L, "2026-10", false, empty))
+                .isInstanceOf(ValidationException.class);
+        verifyNoInteractions(s3Client);
+    }
+
+    @Test
+    void upload_acceptsUpperCaseExtension() throws Exception {
+        loginAsHr();
+        when(salarySlipMapper.countByEmployeeAndMonth(4L, "2026-10")).thenReturn(0);
+        when(salarySlipMapper.findIdByEmployeeAndMonth(4L, "2026-10")).thenReturn(1L);
+        MockMultipartFile upper = new MockMultipartFile("file", "SLIP.PDF", "application/pdf", "pdf".getBytes());
+
+        salarySlipService.upload("sub-hr", 4L, "2026-10", false, upper);
+
+        verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));//.PDFも受け付ける
+    }
+
+    @Test
+    void upload_throws403_beforeValidatingFile() {
+        loginAsMember();
+        MockMultipartFile notPdf = new MockMultipartFile("file", "slip.txt", "text/plain", "content".getBytes());
+
+        //権限が無い人には、ファイルの不備(400)ではなく、先に403を返す
+        assertThatThrownBy(() -> salarySlipService.upload("sub-member", 4L, "2026-10", false, notPdf))
+                .isInstanceOf(ForbiddenException.class);
+    }
+
+    @Test
+    void upload_throws404_whenTargetEmployeeDoesNotExist() {
+        loginAsHr();
+        //アップロード先の社員が、存在しない(または論理削除済み)場合
+        when(employeeService.getDetail(999L)).thenThrow(new NotFoundException("社員が見つかりません"));
+
+        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 999L, "2026-10", false, pdf()))
+                .isInstanceOf(NotFoundException.class);
+        //存在しない社員の分は、DBにもS3にも保存しない
+        verifyNoInteractions(salarySlipMapper);
+        verifyNoInteractions(s3Client);
+    }
+
+    // 年月から、社員別のS3のパスが作られる(salary-slips/employee-{社員ID}/{年}/{月}.pdf)
+    @ParameterizedTest
+    @CsvSource({
+            "2026-01, salary-slips/employee-4/2026/01.pdf",
+            "2026-10, salary-slips/employee-4/2026/10.pdf",
+            "2026-12, salary-slips/employee-4/2026/12.pdf" })
+    void upload_savesToPerEmployeePath(String payMonth, String expectedKey) throws Exception {
+        loginAsHr();
+        when(salarySlipMapper.countByEmployeeAndMonth(4L, payMonth)).thenReturn(0);
+        when(salarySlipMapper.findIdByEmployeeAndMonth(4L, payMonth)).thenReturn(1L);
+
+        salarySlipService.upload("sub-hr", 4L, payMonth, false, pdf());
+
+        ArgumentCaptor<PutObjectRequest> captor = ArgumentCaptor.forClass(PutObjectRequest.class);
+        verify(s3Client).putObject(captor.capture(), any(RequestBody.class));
+        assertThat(captor.getValue().key()).isEqualTo(expectedKey);//S3に保存するキー
+        verify(salarySlipMapper).insert(4L, payMonth, expectedKey, 1L);//DBに記録するfile_pathも同じ
+    }
+
+    @Test
+    void upload_doesNotUseOriginalFileName_forS3Key() throws Exception {
+        loginAsHr();
+        when(salarySlipMapper.countByEmployeeAndMonth(4L, "2026-10")).thenReturn(0);
+        when(salarySlipMapper.findIdByEmployeeAndMonth(4L, "2026-10")).thenReturn(1L);
+        //アップロードする人の手元のファイル名が何でも、保存名はサーバーが決める
+        MockMultipartFile file = new MockMultipartFile("file", "給与明細_最終版(1).pdf", "application/pdf", "pdf".getBytes());
+
+        salarySlipService.upload("sub-hr", 4L, "2026-10", false, file);
+
+        ArgumentCaptor<PutObjectRequest> captor = ArgumentCaptor.forClass(PutObjectRequest.class);
+        verify(s3Client).putObject(captor.capture(), any(RequestBody.class));
+        assertThat(captor.getValue().key()).isEqualTo("salary-slips/employee-4/2026/10.pdf");
+    }
+
     @Test
     void upload_throws409_whenAlreadyExistsAndNoOverwrite() {
         loginAsHr();
@@ -123,9 +240,9 @@ class SalarySlipServiceTest {
         ArgumentCaptor<PutObjectRequest> captor = ArgumentCaptor.forClass(PutObjectRequest.class);
         verify(s3Client).putObject(captor.capture(), any(RequestBody.class));
         assertThat(captor.getValue().bucket()).isEqualTo("test-bucket");
-        assertThat(captor.getValue().key()).isEqualTo("salary-slips/2026-10/employee-4.pdf");
+        assertThat(captor.getValue().key()).isEqualTo("salary-slips/employee-4/2026/10.pdf");
         //アップロードした人は、仮の値ではなく、ログイン中のHR管理者(id=1)
-        verify(salarySlipMapper).insert(4L, "2026-10", "salary-slips/2026-10/employee-4.pdf", 1L);
+        verify(salarySlipMapper).insert(4L, "2026-10", "salary-slips/employee-4/2026/10.pdf", 1L);
         verify(salarySlipMapper, never()).updateFilePath(anyLong(), anyString(), anyString(), anyLong());
         assertThat(result.getId()).isEqualTo(7L);
         assertThat(result.getEmployeeId()).isEqualTo(4L);
@@ -140,7 +257,7 @@ class SalarySlipServiceTest {
 
         salarySlipService.upload("sub-hr", 4L, "2026-10", true, pdf());
 
-        verify(salarySlipMapper).updateFilePath(4L, "2026-10", "salary-slips/2026-10/employee-4.pdf", 1L);
+        verify(salarySlipMapper).updateFilePath(4L, "2026-10", "salary-slips/employee-4/2026/10.pdf", 1L);
         verify(salarySlipMapper, never()).insert(anyLong(), anyString(), anyString(), anyLong());
     }
 
@@ -200,7 +317,7 @@ class SalarySlipServiceTest {
     void download_returnsPdfBytes_forOwner() {
         loginAsMember();//id=4
         when(salarySlipMapper.findEmployeeIdById(5L)).thenReturn(4L);
-        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/2026-10/employee-4.pdf");
+        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/employee-4/2026/10.pdf");
         byte[] bytes = "pdf-content".getBytes();
         when(s3Client.getObjectAsBytes(any(GetObjectRequest.class)))
                 .thenReturn(ResponseBytes.fromByteArray(GetObjectResponse.builder().build(), bytes));
@@ -211,14 +328,14 @@ class SalarySlipServiceTest {
         ArgumentCaptor<GetObjectRequest> captor = ArgumentCaptor.forClass(GetObjectRequest.class);
         verify(s3Client).getObjectAsBytes(captor.capture());
         assertThat(captor.getValue().bucket()).isEqualTo("test-bucket");
-        assertThat(captor.getValue().key()).isEqualTo("salary-slips/2026-10/employee-4.pdf");
+        assertThat(captor.getValue().key()).isEqualTo("salary-slips/employee-4/2026/10.pdf");
     }
 
     @Test
     void download_returnsPdfBytes_forHrAdmin_evenIfNotOwner() {
         loginAsHr();//id=1
         when(salarySlipMapper.findEmployeeIdById(5L)).thenReturn(4L);
-        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/2026-10/employee-4.pdf");
+        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/employee-4/2026/10.pdf");
         byte[] bytes = "pdf-content".getBytes();
         when(s3Client.getObjectAsBytes(any(GetObjectRequest.class)))
                 .thenReturn(ResponseBytes.fromByteArray(GetObjectResponse.builder().build(), bytes));
@@ -264,7 +381,7 @@ class SalarySlipServiceTest {
     @Test
     void delete_removesS3ObjectThenDbRow() {
         loginAsHr();
-        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/2026-10/employee-4.pdf");
+        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/employee-4/2026/10.pdf");
 
         salarySlipService.delete("sub-hr", 5L);
 
@@ -273,7 +390,7 @@ class SalarySlipServiceTest {
         order.verify(s3Client).deleteObject(captor.capture());//先にS3のファイルを消し
         order.verify(salarySlipMapper).deleteById(5L);//そのあとDBの行を消す
         assertThat(captor.getValue().bucket()).isEqualTo("test-bucket");
-        assertThat(captor.getValue().key()).isEqualTo("salary-slips/2026-10/employee-4.pdf");
+        assertThat(captor.getValue().key()).isEqualTo("salary-slips/employee-4/2026/10.pdf");
     }
 
     // ---------- listHistory (API013) ----------

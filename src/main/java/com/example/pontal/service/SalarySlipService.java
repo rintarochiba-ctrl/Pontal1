@@ -49,6 +49,22 @@ public class SalarySlipService {
         boolean overwrite,MultipartFile file) throws IOException {
         LoginEmployee login = employeeService.getLoginEmployee(cognitoSub);
         requireHrAdmin(login);
+
+        //payMonthはS3のパスの一部になるため、YYYY-MM形式(月は01〜12)だけを許可する
+        if (!payMonth.matches("^\\d{4}-(0[1-9]|1[0-2])$")) {
+            throw new ValidationException("payMonthはYYYY-MM形式で指定してください");
+        }
+
+        //ファイルは必須。中身が空でなく、拡張子が.pdf(大文字小文字は区別しない)のものだけを許可する
+        //(保存名はサーバーが決めるので、元のファイル名は、この拡張子の確認にだけ使う)
+        String originalName = file.getOriginalFilename();
+        if (file.isEmpty() || originalName == null || !originalName.toLowerCase().endsWith(".pdf")) {
+            throw new ValidationException("PDFファイル(.pdf)を指定してください");
+        }
+
+        //アップロード先の社員が存在することを確認する(存在しない・論理削除済みなら404)
+        employeeService.getDetail(employeeId);
+
         Long uploadedBy = login.getEmployeeId();//アップロードした社員のID(ログイン中)
         // idと年月で給与明細存在するかチェック(boolean)
         boolean exists = salarySlipMapper.countByEmployeeAndMonth(employeeId, payMonth) > 0;
@@ -57,7 +73,7 @@ public class SalarySlipService {
             throw new ConflictException("既に" + payMonth + "分の給与明細が登録されています");
         }
 
-        String filePath = "salary-slips/" + payMonth + "/employee-" + employeeId + ".pdf";
+        String filePath = "salary-slips/employee-" + employeeId + "/" + payMonth.replace("-", "/") + ".pdf";
         //AWS SDKのPutObjectRequestクラスはS3への保存リクエスト作成に使用
         PutObjectRequest request = PutObjectRequest.builder()
                 .bucket(bucketName) //保存先バケット

@@ -27,6 +27,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
@@ -132,6 +134,41 @@ class SalarySlipControllerTest {
         mockMvc.perform(multipart("/api/salary-slips").file(pdf()).with(user())
                 .param("employeeId", "4").param("payMonth", "2026-10"))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void upload_returns404_whenTargetEmployeeDoesNotExist() throws Exception {
+        when(salarySlipService.upload(anyString(), anyLong(), anyString(), anyBoolean(), any()))
+                .thenThrow(new NotFoundException("社員が見つかりません"));
+
+        mockMvc.perform(multipart("/api/salary-slips").file(pdf()).with(user())
+                .param("employeeId", "999").param("payMonth", "2026-10"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("社員が見つかりません"));
+    }
+
+    // DBの制約違反は、原因に合わせたメッセージで返す(以前は常に「value already in use」だった)
+    @Test
+    void upload_returns409WithMessage_whenDatabaseReportsDuplicate() throws Exception {
+        when(salarySlipService.upload(anyString(), anyLong(), anyString(), anyBoolean(), any()))
+                .thenThrow(new DuplicateKeyException("duplicate key"));
+
+        mockMvc.perform(multipart("/api/salary-slips").file(pdf()).with(user())
+                .param("employeeId", "4").param("payMonth", "2026-10"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("既に登録されている値と重複しています"));
+    }
+
+    @Test
+    void upload_returns400WithMessage_whenDatabaseRejectsTheInput() throws Exception {
+        //重複以外の制約違反(必須項目の未入力、存在しない社員の指定など)
+        when(salarySlipService.upload(anyString(), anyLong(), anyString(), anyBoolean(), any()))
+                .thenThrow(new DataIntegrityViolationException("foreign key violation"));
+
+        mockMvc.perform(multipart("/api/salary-slips").file(pdf()).with(user())
+                .param("employeeId", "4").param("payMonth", "2026-10"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("入力内容がデータベースの制約に合いません"));
     }
 
     // ---------- GET /api/employees/{employeeId}/salary-slips ----------

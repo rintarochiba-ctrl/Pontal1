@@ -249,12 +249,14 @@ paths:
                   format: int64
                 payMonth:
                   type: string
-                  pattern: "^\\d{4}-\\d{2}$"
-                  description: 支給年月(YYYY-MM)
+                  pattern: "^\\d{4}-(0[1-9]|1[0-2])$"
+                  description: 支給年月(YYYY-MM、月は01〜12)。S3の保存パスの一部になる
                 file:
                   type: string
                   format: binary
-                  description: 給与明細PDF(拡張子.pdf必須、1件のみ)
+                  description: >-
+                    給与明細PDF(拡張子.pdf必須、中身が空でないこと、1件のみ)。
+                    保存名はサーバーが決める(salary-slips/employee-{社員ID}/{年}/{月}.pdf)ため、元のファイル名は何でもよい
                 overwrite:
                   type: boolean
                   default: false
@@ -272,6 +274,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
 
@@ -311,6 +315,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            default: 0
         - name: size
           in: query
           required: false
@@ -318,15 +323,18 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
+            default: 20
       responses:
         "200":
-          description: OK
+          description: OK(新しい順)
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/SalarySlipUploadHistory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
