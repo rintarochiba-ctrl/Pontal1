@@ -47,7 +47,7 @@ public class EmployeeService {
     //CognitoユーザープールID(.envのCOGNITO_USER_POOL_IDが実体)
     @Value("${cognito.user-pool-id}")
     private String userPoolId;
-
+    //コンストラクタでDIにより部品を受け取る
     public EmployeeService(EmployeeMapper employeeMapper, CognitoIdentityProviderClient cognitoClient) {
         this.employeeMapper = employeeMapper;
         this.cognitoClient = cognitoClient;
@@ -64,7 +64,7 @@ public class EmployeeService {
         return employee;
     }
 
-        //社員詳細を返す(ログイン済みなら誰でも閲覧可)
+    //社員詳細を返す(ログイン済みなら誰でも閲覧可)
     public EmployeeDetail getDetail(Long id) {
         EmployeeDetail detail = employeeMapper.findDetailById(id);
 
@@ -75,8 +75,8 @@ public class EmployeeService {
         return detail;
     }
 
-        //社員一覧を返す(ログイン済みなら誰でも閲覧可)
-    public EmployeePage search(int page, int size, String keyword) {
+    //社員一覧を返す(ログイン済みなら誰でも閲覧可)
+    public EmployeePage list(int page, int size, String keyword) {
         //Notionのバリデーション規約: page=0以上、size=1〜100
         if (page < 0) {
             throw new ValidationException("pageは0以上で指定してください");
@@ -110,10 +110,10 @@ public class EmployeeService {
             throw new ForbiddenException("社員を編集する権限がありません");
         }
 
-        int updated = employeeMapper.update(id, request);
+        int updatedCount = employeeMapper.update(id, request);
 
         //更新0件 → 存在しない/論理削除済み
-        if (updated == 0) {
+        if (updatedCount == 0) {
             throw new NotFoundException("社員が見つかりません");
         }
         return getDetail(id);
@@ -135,11 +135,11 @@ public class EmployeeService {
         //ユーザープールはメールをユーザー名として使う設定のため、メールアドレスをそのまま渡す
         //(Cognitoが内部でsub(UUID)を発行する)
         String username = request.getEmail();
-
+        //Cognitoへのユーザー登録リクエストを作成
         AdminCreateUserRequest createRequest = AdminCreateUserRequest.builder()
-                .userPoolId(userPoolId)
-                .username(username)
-                .temporaryPassword(request.getInitialPassword())
+                .userPoolId(userPoolId)                          //ユーザープールID
+                .username(username)                              //ユーザーネーム(email)
+                .temporaryPassword(request.getInitialPassword()) //パスワード
                 .userAttributes(
                         AttributeType.builder().name("email").value(request.getEmail()).build(),
                         //メールでのログインに使うため検証済みにしておく

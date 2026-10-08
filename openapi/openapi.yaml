@@ -12,8 +12,6 @@ tags:
     description: 社員管理
   - name: salary-slips
     description: 給与明細
-  - name: salary-upload-batches
-    description: 給与明細アップロード履歴
   - name: audit-log-batches
     description: 監査ログエクスポート
 paths:
@@ -229,49 +227,57 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/salary-slips/upload:
+  /api/salary-slips:
     post:
       tags: [salary-slips]
       summary: 給与明細アップロード
       description: >-
-        CSVと複数PDFを一括アップロードし給与明細を登録する(isHrAdminのみ、非同期処理)。
+        社員と対象年月を選択し、PDF1件をアップロードして給与明細を登録する(isHrAdminのみ、同期処理)。
+        既存データ(同一employeeId+payMonth)がある場合は409を返し、overwrite=trueを付けて再送すると上書きする。
         成功時、監査ログにCREATEを記録する。
-      operationId: uploadSalarySlips
+      operationId: uploadSalarySlip
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [payMonth, csvFile, pdfFiles]
+              required: [employeeId, payMonth, file]
               properties:
+                employeeId:
+                  type: integer
+                  format: int64
                 payMonth:
                   type: string
-                  pattern: "^\\d{4}-\\d{2}$"
-                  description: 支給年月(YYYY-MM)
-                csvFile:
+                  pattern: "^\\d{4}-(0[1-9]|1[0-2])$"
+                  description: 支給年月(YYYY-MM、月は01〜12)。S3の保存パスの一部になる
+                file:
                   type: string
                   format: binary
-                  description: 社員ID⇔ファイル名の紐付けCSV
-                pdfFiles:
-                  type: array
-                  items:
-                    type: string
-                    format: binary
-                  description: 拡張子.pdf必須、合計サイズ上限あり
+                  description: >-
+                    給与明細PDF(拡張子.pdf必須、中身が空でないこと、1件のみ)。
+                    保存名はサーバーが決める(salary-slips/employee-{社員ID}/{年}/{月}.pdf)ため、元のファイル名は何でもよい
+                overwrite:
+                  type: boolean
+                  default: false
+                  description: 既存データを上書きする場合true
       responses:
-        "202":
-          description: Accepted
+        "201":
+          description: Created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SalaryUploadAcceptedResponse"
+                $ref: "#/components/schemas/SalarySlipUploadResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/salary-slips/{slipId}:
     delete:
@@ -296,12 +302,12 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/salary-upload-batches:
+  /api/salary-slips/history:
     get:
-      tags: [salary-upload-batches]
+      tags: [salary-slips]
       summary: アップロード履歴一覧取得
-      description: アップロードバッチの実行結果(ステータス・件数)を一覧取得する(isHrAdminのみ)
-      operationId: listSalaryUploadBatches
+      description: 給与明細のアップロード履歴(誰が・いつ・誰の分の・何年月分をアップロードしたか)を一覧取得する(isHrAdminのみ)
+      operationId: listSalarySlipUploadHistory
       parameters:
         - name: page
           in: query
@@ -309,6 +315,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            default: 0
         - name: size
           in: query
           required: false
@@ -316,46 +323,22 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
+            default: 20
       responses:
         "200":
-          description: OK
+          description: OK(新しい順)
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/SalaryUploadBatch"
+                  $ref: "#/components/schemas/SalarySlipUploadHistory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-
-  /api/salary-upload-batches/{batchId}:
-    get:
-      tags: [salary-upload-batches]
-      summary: アップロード履歴詳細取得
-      description: 特定バッチの失敗行と理由を取得する(isHrAdminのみ)
-      operationId: getSalaryUploadBatch
-      parameters:
-        - name: batchId
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SalaryUploadBatchDetail"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
 
   /api/audit-log-batches:
     get:
@@ -642,23 +625,28 @@ components:
           type: string
           pattern: "^\\d{4}-\\d{2}$"
 
-    SalaryUploadAcceptedResponse:
+    SalarySlipUploadResult:
       type: object
+      description: 給与明細アップロードAPIの成功レスポンス
       properties:
-        batchId:
+        id:
           type: integer
           format: int64
-        status:
-          $ref: "#/components/schemas/SalaryUploadBatchStatus"
+        employeeId:
+          type: integer
+          format: int64
+        payMonth:
+          type: string
+          pattern: "^\\d{4}-\\d{2}$"
 
-    SalaryUploadBatchStatus:
-      type: string
-      enum: [PROCESSING, COMPLETED, PARTIALLY_FAILED, FAILED]
-
-    SalaryUploadBatch:
+    SalarySlipUploadHistory:
       type: object
+      description: アップロード履歴一覧の1件分(誰が・いつ・誰の分をアップロードしたか)
       properties:
-        batchId:
+        slipId:
+          type: integer
+          format: int64
+        employeeId:
           type: integer
           format: int64
         payMonth:
@@ -667,40 +655,9 @@ components:
         uploadedBy:
           type: integer
           format: int64
-        status:
-          $ref: "#/components/schemas/SalaryUploadBatchStatus"
-        successCount:
-          type: integer
-        failureCount:
-          type: integer
-        createdAt:
+        uploadedAt:
           type: string
           format: date-time
-
-    SalaryUploadBatchError:
-      type: object
-      properties:
-        rowNumber:
-          type: integer
-        employeeId:
-          type: integer
-          format: int64
-          nullable: true
-          description: CSV上の社員IDが不明な場合はnull
-        filename:
-          type: string
-        errorMessage:
-          type: string
-
-    SalaryUploadBatchDetail:
-      allOf:
-        - $ref: "#/components/schemas/SalaryUploadBatch"
-        - type: object
-          properties:
-            errors:
-              type: array
-              items:
-                $ref: "#/components/schemas/SalaryUploadBatchError"
 
     AuditLogExportBatchStatus:
       type: string

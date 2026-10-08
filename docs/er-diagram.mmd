@@ -1,11 +1,7 @@
 erDiagram
     employee ||--o{ salary_slip : "has"
-    employee ||--o{ salary_upload_batch : "uploads"
-    employee ||--o{ salary_upload_batch_error : "may appear in"
     employee ||--o{ audit_log : "acts as (actor)"
     employee ||--o{ audit_log : "is target of"
-    salary_upload_batch ||--o{ salary_slip : "contains"
-    salary_upload_batch ||--o{ salary_upload_batch_error : "contains"
 
     employee {
         bigint id PK
@@ -29,35 +25,13 @@ erDiagram
         timestamp updated_at
     }
 
-    salary_upload_batch {
-        bigint id PK
-        bigint uploaded_by FK
-        varchar pay_month
-        varchar status
-        int total_rows
-        int success_count
-        int failure_count
-        timestamp created_at
-        timestamp completed_at
-    }
-
     salary_slip {
         bigint id PK
         bigint employee_id FK
         varchar pay_month
         varchar file_path
         bigint uploaded_by FK
-        bigint batch_id FK
         timestamp uploaded_at
-    }
-
-    salary_upload_batch_error {
-        bigint id PK
-        bigint batch_id FK
-        int row_number
-        bigint employee_id FK
-        varchar filename
-        varchar error_message
     }
 
     audit_log {

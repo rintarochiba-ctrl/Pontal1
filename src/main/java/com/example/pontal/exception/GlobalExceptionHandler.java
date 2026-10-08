@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -14,9 +15,16 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    //UNIQUE制約の違反(同じ値がすでにある)。DataIntegrityViolationExceptionの一種なので、こちらを先に判定させる
+    @ExceptionHandler(DuplicateKeyException.class)
+    public ResponseEntity<Map<String, Object>> handleDuplicateKey(DuplicateKeyException ex) {
+        return error(HttpStatus.CONFLICT, "既に登録されている値と重複しています");
+    }
+
+    //それ以外の制約違反(必須項目の未入力、存在しない社員の指定など)
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, Object>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
-        return error(HttpStatus.BAD_REQUEST, "value already in use");
+        return error(HttpStatus.BAD_REQUEST, "入力内容がデータベースの制約に合いません");
     }
 
     @ExceptionHandler(UnauthorizedException.class)

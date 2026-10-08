@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.pontal.mapper.SalarySlipMapper">
+
+    <!-- 重複チェック用(0か1を返す) -->
+    <select id="countByEmployeeAndMonth" resultType="int">
+        SELECT COUNT(*)
+        FROM salary_slip
+        WHERE employee_id = #{employeeId}
+          AND pay_month = #{payMonth}
+    </select>
+
+    <!-- 給与明細登録用 -->
+    <insert id="insert">
+    INSERT INTO salary_slip (employee_id, pay_month, file_path, uploaded_by)
+    VALUES (#{employeeId}, #{payMonth}, #{filePath}, #{uploadedBy})
+    </insert>
+
+    <!-- ファイル更新用 -->
+    <update id="updateFilePath">
+        UPDATE salary_slip
+        SET file_path = #{filePath},
+            uploaded_by = #{uploadedBy},
+            uploaded_at = now()
+        WHERE employee_id = #{employeeId}
+        AND pay_month = #{payMonth}
+    </update>
+
+    <!-- 登録または更新後のID取得 -->
+    <select id="findIdByEmployeeAndMonth" resultType="long">
+        SELECT id
+        FROM salary_slip
+        WHERE employee_id = #{employeeId}
+        AND pay_month = #{payMonth}
+    </select>
+
+    <!-- 特定社員の給与明細一覧(id, payMonthのみ) -->
+    <select id="selectByEmployeeId" resultType="com.example.pontal.dto.SalarySlipSummary">
+        SELECT id, pay_month
+        FROM salary_slip
+        WHERE employee_id = #{employeeId}
+        ORDER BY pay_month DESC
+    </select>
+
+    <!-- 削除前にS3のオブジェクトキーを知るため、file_pathを取得(無ければnullが返る=存在しない) -->
+    <select id="findFilePathById" resultType="string">
+        SELECT file_path
+        FROM salary_slip
+        WHERE id = #{slipId}
+    </select>
+
+    <!-- 給与明細削除用 -->
+    <delete id="deleteById">
+        DELETE FROM salary_slip
+        WHERE id = #{slipId}
+    </delete>
+
+    <!-- 明細の社員IDを取得、なければnullを返す -->
+    <select id="findEmployeeIdById" resultType="long">
+        SELECT employee_id
+        FROM salary_slip
+        WHERE id = #{slipId}
+    </select>
+
+    <!-- アップロード履歴一覧、新しい順 -->
+    <select id="selectHistory" resultType="com.example.pontal.dto.SalarySlipUploadHistory">
+        SELECT id AS slip_id, employee_id, pay_month, uploaded_by, uploaded_at
+        FROM salary_slip
+        ORDER BY uploaded_at DESC, id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+</mapper>
+
