@@ -23,6 +23,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.example.pontal.config.MyBatisConfig;
+import com.example.pontal.dto.AuditLogExportRow;
 import com.example.pontal.enums.AuditAction;
 import com.example.pontal.enums.AuditResourceType;
 
@@ -126,5 +127,79 @@ class AuditLogMapperTest {
         //resource_idはNOT NULL
         assertThatThrownBy(() -> auditLogMapper.insert(1L, 4L, AuditResourceType.SALARY_SLIP, null, AuditAction.DOWNLOAD))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    // ---------- selectForExport (週次エクスポート) ----------
+
+    //ログを1件記録して、発生日時を、指定した値にする(INSERTだけだと、今の日時になってしまうため)
+    private void insertLogAt(Long actorId, Long targetId, Long resourceId, LocalDateTime at) {
+        auditLogMapper.insert(actorId, targetId, AuditResourceType.SALARY_SLIP, resourceId, AuditAction.DOWNLOAD);
+        Long id = jdbcTemplate.queryForObject("SELECT max(id) FROM audit_log", Long.class);
+        jdbcTemplate.update("UPDATE audit_log SET occurred_at = ? WHERE id = ?", at, id);
+    }
+
+    @Test
+    void selectForExport_includesStartInclusive_andExcludesEndExclusive() {
+        //集める期間は、2026-10-05 00:00 以上、2026-10-12 00:00 未満(1週間)
+        insertLogAt(1L, 4L, 1L, LocalDateTime.of(2026, 10, 4, 23, 59, 59));//前の週 → 含まれない
+        insertLogAt(1L, 4L, 2L, LocalDateTime.of(2026, 10, 5, 0, 0, 0));//月曜0時ちょうど → 含まれる
+        insertLogAt(1L, 4L, 3L, LocalDateTime.of(2026, 10, 11, 23, 59, 59));//日曜の最後 → 含まれる
+        insertLogAt(1L, 4L, 4L, LocalDateTime.of(2026, 10, 12, 0, 0, 0));//翌週の月曜0時ちょうど → 含まれない
+
+        List<AuditLogExportRow> rows = auditLogMapper.selectForExport(
+                LocalDateTime.of(2026, 10, 5, 0, 0), LocalDateTime.of(2026, 10, 12, 0, 0));
+
+        assertThat(rows).extracting(AuditLogExportRow::getResourceId).containsExactly(2L, 3L);
+    }
+
+    @Test
+    void selectForExport_ordersByOccurredAtOldestFirst() {
+        //記録した順とは違う並びで入れて、発生日時の古い順に並ぶことを確認する
+        insertLogAt(1L, 4L, 30L, LocalDateTime.of(2026, 10, 9, 12, 0, 0));
+        insertLogAt(1L, 4L, 10L, LocalDateTime.of(2026, 10, 6, 9, 0, 0));
+        insertLogAt(1L, 4L, 20L, LocalDateTime.of(2026, 10, 7, 15, 30, 0));
+
+        List<AuditLogExportRow> rows = auditLogMapper.selectForExport(
+                LocalDateTime.of(2026, 10, 5, 0, 0), LocalDateTime.of(2026, 10, 12, 0, 0));
+
+        assertThat(rows).extracting(AuditLogExportRow::getResourceId).containsExactly(10L, 20L, 30L);
+    }
+
+    @Test
+    void selectForExport_returnsNamesAndAllColumns() {
+        insertLogAt(2L, 4L, 8L, LocalDateTime.of(2026, 10, 6, 10, 0, 0));
+
+        AuditLogExportRow row = auditLogMapper.selectForExport(
+                LocalDateTime.of(2026, 10, 5, 0, 0), LocalDateTime.of(2026, 10, 12, 0, 0)).get(0);
+
+        assertThat(row.getOccurredAt()).isEqualTo(LocalDateTime.of(2026, 10, 6, 10, 0, 0));
+        assertThat(row.getActorEmployeeId()).isEqualTo(2L);
+        assertThat(row.getActorName()).isEqualTo("佐藤花子");//操作者の名前
+        assertThat(row.getTargetEmployeeId()).isEqualTo(4L);
+        assertThat(row.getTargetName()).isEqualTo("権限なしテスト");//対象社員の名前
+        assertThat(row.getResourceType()).isEqualTo("SALARY_SLIP");
+        assertThat(row.getResourceId()).isEqualTo(8L);
+        assertThat(row.getAction()).isEqualTo("DOWNLOAD");
+    }
+
+    @Test
+    void selectForExport_stillReturnsNames_forSoftDeletedEmployees() {
+        insertLogAt(1L, 4L, 8L, LocalDateTime.of(2026, 10, 6, 10, 0, 0));
+        //社員を論理削除(is_delete=true)しても、行は残るので、過去のログの名前は取れる
+        jdbcTemplate.update("UPDATE employee SET is_delete = TRUE WHERE id = 4");
+
+        List<AuditLogExportRow> rows = auditLogMapper.selectForExport(
+                LocalDateTime.of(2026, 10, 5, 0, 0), LocalDateTime.of(2026, 10, 12, 0, 0));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getTargetName()).isEqualTo("権限なしテスト");
+    }
+
+    @Test
+    void selectForExport_returnsEmptyList_whenNoLogsInPeriod() {
+        insertLogAt(1L, 4L, 1L, LocalDateTime.of(2026, 9, 1, 0, 0, 0));
+
+        assertThat(auditLogMapper.selectForExport(
+                LocalDateTime.of(2026, 10, 5, 0, 0), LocalDateTime.of(2026, 10, 12, 0, 0))).isEmpty();
     }
 }

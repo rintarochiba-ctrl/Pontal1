@@ -31,8 +31,9 @@
         ORDER BY period_start
     </select>
 
-    <!-- 新しい週のバッチを処理中で登録(statusはDEFAULT 'PROCESSING')。INSERT ... RETURNING idでidを受け取る -->
-    <select id="insertProcessing" resultType="long">
+    <!-- 新しい週のバッチを処理中で登録(statusはDEFAULT 'PROCESSING')。INSERT ... RETURNING idでidを受け取る
+         selectとして書いているため、flushCache="true"が無いと、同じ条件で2回呼んだときに2回目はSQLを実行せず、1回目のidが返ってしまう -->
+    <select id="insertProcessing" resultType="long" flushCache="true">
         INSERT INTO audit_log_export_batch (period_start, period_end)
         VALUES (#{periodStart}, #{periodEnd})
         RETURNING id
