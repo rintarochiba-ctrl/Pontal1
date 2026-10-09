@@ -44,6 +44,8 @@ class EmployeeMapperTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        //アプリ本体はSQLを自動実行しない設定なので、このテストでだけ、schema.sqlとdata.sqlを流す
+        registry.add("spring.sql.init.mode", () -> "always");
     }
 
     @Autowired

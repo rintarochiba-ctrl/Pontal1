@@ -34,6 +34,7 @@ import com.example.pontal.dto.EmployeeDetail;
 import com.example.pontal.dto.EmployeePage;
 import com.example.pontal.dto.LoginEmployee;
 import com.example.pontal.exception.ConflictException;
+import com.example.pontal.exception.ExternalServiceException;
 import com.example.pontal.exception.ForbiddenException;
 import com.example.pontal.exception.NotFoundException;
 import com.example.pontal.exception.ValidationException;
@@ -364,5 +365,17 @@ class EmployeeControllerTest {
 
         mockMvc.perform(delete("/api/employees/999").with(admin()))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void delete_returns500WithMessage_whenCognitoDisableFails() throws Exception {
+        org.mockito.Mockito.doThrow(new ExternalServiceException("社員は削除されましたが、Cognitoの無効化に失敗しました"))
+                .when(employeeService).delete("sub-admin", 3L);
+
+        //成功(204)ではなく、エラーと原因のメッセージが返る
+        mockMvc.perform(delete("/api/employees/3").with(admin()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.result").value(false))
+                .andExpect(jsonPath("$.message").value("社員は削除されましたが、Cognitoの無効化に失敗しました"));
     }
 }

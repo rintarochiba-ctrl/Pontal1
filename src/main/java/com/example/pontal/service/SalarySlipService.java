@@ -66,6 +66,9 @@ public class SalarySlipService {
             throw new ValidationException("PDFファイル(.pdf)を指定してください");
         }
 
+        //アップロード先の社員が存在することを確認する(存在しない・論理削除済みなら404)
+        employeeService.getDetail(employeeId);
+
         Long uploadedBy = login.getEmployeeId();//アップロードした社員のID(ログイン中)
         // idと年月で給与明細存在するかチェック(boolean)
         boolean exists = salarySlipMapper.countByEmployeeAndMonth(employeeId, payMonth) > 0;

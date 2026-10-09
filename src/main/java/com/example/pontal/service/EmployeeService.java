@@ -20,6 +20,7 @@ import com.example.pontal.exception.ValidationException;
 import com.example.pontal.exception.ForbiddenException;
 import com.example.pontal.exception.NotFoundException;
 import com.example.pontal.exception.ConflictException;
+import com.example.pontal.exception.ExternalServiceException;
 
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
@@ -31,6 +32,7 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.AliasExists
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InvalidPasswordException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.MessageActionType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.UserNotFoundException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.UsernameExistsException;
 
 
@@ -154,23 +156,37 @@ public class EmployeeService {
             throw new ValidationException("初期パスワードがパスワードポリシーを満たしていません");
         }
 
-        //Cognitoが発行したsub(employee.cognito_subに保存する値)を取り出す
-        String newSub = created.user().attributes().stream()
-                .filter(a -> a.name().equals("sub"))
-                .findFirst()
-                .orElseThrow()
-                .value();
-
+        //ここから先でDBへの登録が終わるまでに失敗したら、作ったCognitoユーザーを消して、不整合を残さない
+        //(tryに入れるのは「subの取り出し」と「INSERT」だけ。INSERTが成功した後の失敗では、DBに行が残るのでCognitoは消さない)
+        Long id;
         try {
-            Long id = employeeMapper.insert(request, newSub);
-            return getDetail(id);
+            //Cognitoが発行したsub(employee.cognito_subに保存する値)を取り出す
+            String newSub = created.user().attributes().stream()
+                    .filter(a -> a.name().equals("sub"))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException("Cognitoの応答にsubが含まれていません"))
+                    .value();
+            id = employeeMapper.insert(request, newSub);
         } catch (RuntimeException e) {
-            //DB登録に失敗したら、作ったCognitoユーザーも消して不整合を残さない
+            deleteCognitoUser(username, e);
+            throw e;
+        }
+
+        //登録した社員を読み直して返す(失敗しても、DBには登録済みなのでCognitoは消さない)
+        return getDetail(id);
+    }
+
+    //登録の途中で失敗したときに、作ったCognitoユーザーを消す(巻き戻し)
+    //消すのに失敗しても、もともと起きたエラー(original)を隠さないように、付け足して残す
+    private void deleteCognitoUser(String username, RuntimeException original) {
+        try {
             cognitoClient.adminDeleteUser(AdminDeleteUserRequest.builder()
                     .userPoolId(userPoolId)
                     .username(username)
                     .build());
-            throw e;
+        } catch (SdkException deleteError) {
+            original.addSuppressed(deleteError);
+            log.error("Cognitoユーザーの巻き戻し(削除)に失敗しました。手動で削除が必要です username={}", username, deleteError);
         }
     }
 
@@ -197,17 +213,22 @@ public class EmployeeService {
         disableCognitoUser(employeeMapper.findCognitoSubById(id));
     }
 
-    //Cognitoのユーザーを無効化する(トークンの新規発行を止める)。
-    //ログイン可否はDBのis_deleteで既に止まっているため、失敗しても削除自体は成功として扱い、ログだけ残す
+    //Cognitoのユーザーを無効化する(トークンの新規発行を止める)
     private void disableCognitoUser(String cognitoSub) {
         try {
             cognitoClient.adminDisableUser(AdminDisableUserRequest.builder()
                     .userPoolId(userPoolId)
                     .username(cognitoSub)
                     .build());
+        } catch (UserNotFoundException e) {
+            //Cognitoにユーザーがいない(ダミーデータなど)。無効化する相手がいないので、成功扱いにする
+            log.warn("Cognitoにユーザーが存在しないため、無効化をスキップしました sub={}", cognitoSub);
         } catch (SdkException e) {
-            //Cognitoに存在しないユーザー(ダミーデータなど)や、通信エラーもここに入る
-            log.warn("Cognitoユーザーの無効化に失敗しました sub={}", cognitoSub, e);
+            //権限エラーや通信エラーなど。本物のユーザーがCognitoで有効なまま残るため、成功扱いにしない
+            //DBの論理削除は済んでいる(APIは使えない)ので、管理者にエラーで知らせ、手動で無効化してもらう
+            log.error("Cognitoユーザーの無効化に失敗しました sub={}", cognitoSub, e);
+            throw new ExternalServiceException(
+                    "社員は削除されましたが、Cognitoの無効化に失敗しました。Cognitoコンソールで手動で無効化してください");
         }
     }
 

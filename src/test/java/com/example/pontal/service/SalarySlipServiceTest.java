@@ -216,6 +216,19 @@ class SalarySlipServiceTest {
     }
 
     @Test
+    void upload_throws404_whenTargetEmployeeDoesNotExist() {
+        loginAsHr();
+        //アップロード先の社員が、存在しない(または論理削除済み)場合
+        when(employeeService.getDetail(999L)).thenThrow(new NotFoundException("社員が見つかりません"));
+
+        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 999L, "2026-10", false, pdf()))
+                .isInstanceOf(NotFoundException.class);
+        //存在しない社員の分は、DBにもS3にも保存しない
+        verifyNoInteractions(salarySlipMapper);
+        verifyNoInteractions(s3Client);
+    }
+
+    @Test
     void upload_throws409_whenAlreadyExistsAndNoOverwrite() {
         loginAsHr();
         when(salarySlipMapper.countByEmployeeAndMonth(4L, "2026-10")).thenReturn(1);
