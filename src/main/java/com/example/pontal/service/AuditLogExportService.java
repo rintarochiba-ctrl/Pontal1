@@ -20,7 +20,7 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-//監査ログの週次エクスポート。1週間(月曜〜日曜)分のログをtxtにしてS3に保存し、バッチ管理表に結果を記録する
+//監査ログの週次エクスポート。1週間(月曜〜日曜)分のログをCSVにしてS3に保存し、バッチ管理表に結果を記録する
 @Service
 public class AuditLogExportService {
 
@@ -41,7 +41,7 @@ public class AuditLogExportService {
         this.s3Client = s3Client;
     }
 
-    //指定した週(periodStartは月曜日)の監査ログをtxtにして、S3に保存する
+    //指定した週(periodStartは月曜日)の監査ログをCSVにして、S3に保存する
     //すでに完了している週は何もしない。失敗や処理中のまま残っている週は、同じ行を使ってやり直す
     public void exportWeek(LocalDate periodStart) {
         if (periodStart.getDayOfWeek() != DayOfWeek.MONDAY) {
@@ -60,8 +60,9 @@ public class AuditLogExportService {
                     periodStart.atStartOfDay(), periodEnd.plusDays(1).atStartOfDay());
 
             String key = buildKey(periodStart, periodEnd);
-            PutObjectRequest request = PutObjectRequest.builder().bucket(bucketName).key(key).build();
-            s3Client.putObject(request, RequestBody.fromString(AuditLogTextFormatter.format(rows), StandardCharsets.UTF_8));
+            PutObjectRequest request = PutObjectRequest.builder()
+                    .bucket(bucketName).key(key).contentType("text/csv; charset=utf-8").build();
+            s3Client.putObject(request, RequestBody.fromString(AuditLogCsvFormatter.format(rows), StandardCharsets.UTF_8));
 
             //S3に保存できてから、完了にする(件数とS3のパスも記録)
             batchMapper.markCompleted(batchId, rows.size(), key);
@@ -97,9 +98,9 @@ public class AuditLogExportService {
         return existing.getId();
     }
 
-    //S3のキー。年と月は、週の開始日(月曜)のもの  例: audit-logs/2026/10/2026-10-05_2026-10-11.txt
+    //S3のキー。年と月は、週の開始日(月曜)のもの  例: audit-logs/2026/10/2026-10-05_2026-10-11.csv
     private String buildKey(LocalDate periodStart, LocalDate periodEnd) {
-        return String.format("audit-logs/%d/%02d/%s_%s.txt",
+        return String.format("audit-logs/%d/%02d/%s_%s.csv",
                 periodStart.getYear(), periodStart.getMonthValue(), periodStart, periodEnd);
     }
 

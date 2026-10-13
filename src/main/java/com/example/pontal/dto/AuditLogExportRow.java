@@ -1,6 +1,6 @@
 package com.example.pontal.dto;
 
-//監査ログのエクスポート(txt)の1行分。名前つきで取り出す
+//監査ログのエクスポート(CSV)の1行分。名前つきで取り出す
 public class AuditLogExportRow {
     private java.time.LocalDateTime occurredAt;
     private Long actorEmployeeId;

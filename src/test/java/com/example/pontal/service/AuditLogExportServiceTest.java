@@ -98,7 +98,7 @@ class AuditLogExportServiceTest {
     // ---------- 新しい週(成功) ----------
 
     @Test
-    void exportWeek_newWeek_savesTextToS3AndMarksCompleted() {
+    void exportWeek_newWeek_savesCsvToS3AndMarksCompleted() {
         when(batchMapper.findByPeriodStart(MONDAY)).thenReturn(null);
         when(batchMapper.insertProcessing(MONDAY, SUNDAY)).thenReturn(7L);
         when(auditLogMapper.selectForExport(any(), any())).thenReturn(List.of(row(), row()));
@@ -111,9 +111,11 @@ class AuditLogExportServiceTest {
         ArgumentCaptor<PutObjectRequest> captor = ArgumentCaptor.forClass(PutObjectRequest.class);
         verify(s3Client).putObject(captor.capture(), any(RequestBody.class));
         assertThat(captor.getValue().bucket()).isEqualTo("test-bucket");
-        assertThat(captor.getValue().key()).isEqualTo("audit-logs/2026/10/2026-10-05_2026-10-11.txt");
+        assertThat(captor.getValue().key()).isEqualTo("audit-logs/2026/10/2026-10-05_2026-10-11.csv");
+        //CSVとして保存する(ダウンロードしたときに、ブラウザがCSVだと分かるように)
+        assertThat(captor.getValue().contentType()).isEqualTo("text/csv; charset=utf-8");
         //完了にして、件数とS3のパスを記録する
-        verify(batchMapper).markCompleted(7L, 2, "audit-logs/2026/10/2026-10-05_2026-10-11.txt");
+        verify(batchMapper).markCompleted(7L, 2, "audit-logs/2026/10/2026-10-05_2026-10-11.csv");
         verify(batchMapper, never()).markFailed(anyLong(), anyString());
     }
 
@@ -141,7 +143,7 @@ class AuditLogExportServiceTest {
 
         //ログが0件の週も、ファイルを作り、件数0で完了にする
         verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
-        verify(batchMapper).markCompleted(7L, 0, "audit-logs/2026/10/2026-10-05_2026-10-11.txt");
+        verify(batchMapper).markCompleted(7L, 0, "audit-logs/2026/10/2026-10-05_2026-10-11.csv");
     }
 
     @Test
@@ -154,7 +156,7 @@ class AuditLogExportServiceTest {
 
         exportService.exportWeek(monday);
 
-        verify(batchMapper).markCompleted(3L, 0, "audit-logs/2026/09/2026-09-28_2026-10-04.txt");
+        verify(batchMapper).markCompleted(3L, 0, "audit-logs/2026/09/2026-09-28_2026-10-04.csv");
     }
 
     // ---------- すでにある週 ----------
@@ -179,7 +181,7 @@ class AuditLogExportServiceTest {
 
         verify(batchMapper).resetToProcessing(7L);//同じ行を処理中に戻す
         verify(batchMapper, never()).insertProcessing(any(), any());//新しい行は作らない
-        verify(batchMapper).markCompleted(7L, 1, "audit-logs/2026/10/2026-10-05_2026-10-11.txt");
+        verify(batchMapper).markCompleted(7L, 1, "audit-logs/2026/10/2026-10-05_2026-10-11.csv");
     }
 
     @Test
@@ -191,7 +193,7 @@ class AuditLogExportServiceTest {
         exportService.exportWeek(MONDAY);
 
         verify(batchMapper).resetToProcessing(7L);
-        verify(batchMapper).markCompleted(7L, 0, "audit-logs/2026/10/2026-10-05_2026-10-11.txt");
+        verify(batchMapper).markCompleted(7L, 0, "audit-logs/2026/10/2026-10-05_2026-10-11.csv");
     }
 
     @Test

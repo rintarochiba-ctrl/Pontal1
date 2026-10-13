@@ -94,13 +94,13 @@ class AuditLogExportBatchMapperTest {
     void markCompleted_setsStatusCountPathAndCompletedAt() {
         Long id = batchMapper.insertProcessing(MONDAY, SUNDAY);
 
-        int updated = batchMapper.markCompleted(id, 12, "audit-logs/2026/10/2026-10-05_2026-10-11.txt");
+        int updated = batchMapper.markCompleted(id, 12, "audit-logs/2026/10/2026-10-05_2026-10-11.csv");
 
         assertThat(updated).isEqualTo(1);
         AuditLogExportBatch batch = batchMapper.findById(id);
         assertThat(batch.getStatus()).isEqualTo("COMPLETED");
         assertThat(batch.getRecordCount()).isEqualTo(12);
-        assertThat(batch.getFilePath()).isEqualTo("audit-logs/2026/10/2026-10-05_2026-10-11.txt");
+        assertThat(batch.getFilePath()).isEqualTo("audit-logs/2026/10/2026-10-05_2026-10-11.csv");
         assertThat(batch.getCompletedAt()).isNotNull();
         assertThat(batch.getErrorMessage()).isNull();
     }
@@ -109,7 +109,7 @@ class AuditLogExportBatchMapperTest {
     void markCompleted_acceptsZeroRecords() {
         Long id = batchMapper.insertProcessing(MONDAY, SUNDAY);
 
-        batchMapper.markCompleted(id, 0, "audit-logs/2026/10/x.txt");
+        batchMapper.markCompleted(id, 0, "audit-logs/2026/10/x.csv");
 
         assertThat(batchMapper.findById(id).getRecordCount()).isEqualTo(0);//0件の週は、NULLではなく0
     }
@@ -160,7 +160,7 @@ class AuditLogExportBatchMapperTest {
         Long id = batchMapper.insertProcessing(MONDAY, SUNDAY);
         batchMapper.markFailed(id, "error");
         batchMapper.resetToProcessing(id);
-        batchMapper.markCompleted(id, 3, "audit-logs/x.txt");
+        batchMapper.markCompleted(id, 3, "audit-logs/x.csv");
 
         AuditLogExportBatch batch = batchMapper.findById(id);
         assertThat(batch.getStatus()).isEqualTo("COMPLETED");
