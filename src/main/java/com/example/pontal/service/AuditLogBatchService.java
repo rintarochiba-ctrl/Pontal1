@@ -3,24 +3,47 @@ package com.example.pontal.service;
 import java.time.LocalDate;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.example.pontal.dto.AuditLogBatchFile;
 import com.example.pontal.dto.AuditLogBatchSummary;
 import com.example.pontal.dto.AuditLogExportBatch;
 import com.example.pontal.dto.LoginEmployee;
+import com.example.pontal.enums.AuditAction;
+import com.example.pontal.enums.AuditResourceType;
+import com.example.pontal.exception.ConflictException;
+import com.example.pontal.exception.ExternalServiceException;
+import com.example.pontal.exception.NotFoundException;
 import com.example.pontal.exception.ForbiddenException;
 import com.example.pontal.exception.ValidationException;
 import com.example.pontal.mapper.AuditLogExportBatchMapper;
 
+import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+
 @Service
 public class AuditLogBatchService {
+    private static final Logger log = LoggerFactory.getLogger(AuditLogBatchService.class);
 
     private final AuditLogExportBatchMapper batchMapper;
     private final EmployeeService employeeService;
+    private final AuditLogService auditLogService;
+    private final S3Client s3Client;
 
-    public AuditLogBatchService(AuditLogExportBatchMapper batchMapper, EmployeeService employeeService) {
+    //application.propertiesのaws.s3.bucketの値(.envのAWS_S3_BUCKETが実体)
+    @Value("${aws.s3.bucket}")
+    private String bucketName;
+
+    public AuditLogBatchService(AuditLogExportBatchMapper batchMapper, EmployeeService employeeService,
+            AuditLogService auditLogService, S3Client s3Client) {
         this.batchMapper = batchMapper;
         this.employeeService = employeeService;
+        this.auditLogService = auditLogService;
+        this.s3Client = s3Client;
     }
 
     //指定した年月のエクスポート一覧を返す(システム管理者のみ、週の開始日の古い順)
@@ -42,6 +65,41 @@ public class AuditLogBatchService {
         return batchMapper.selectByPeriodStartBetween(from, to).stream()
                 .map(this::toSummary)
                 .toList();
+    }
+
+    //エクスポートされたCSVを取得する(システム管理者のみ)。成功したら、ダウンロードしたことを監査ログに記録する
+    public AuditLogBatchFile download(String cognitoSub, Long batchId) {
+        LoginEmployee login = employeeService.getLoginEmployee(cognitoSub);
+        requireSystemAdmin(login);
+
+        AuditLogExportBatch batch = batchMapper.findById(batchId);
+        if (batch == null) {
+            throw new NotFoundException("監査ログのエクスポートが見つかりません");
+        }
+        //処理中・失敗のバッチは、まだファイルがない(または不完全)ので、ダウンロードさせない
+        if (!"COMPLETED".equals(batch.getStatus())) {
+            throw new ConflictException("このエクスポートはダウンロードできません(状態: " + batch.getStatus() + ")");
+        }
+
+        GetObjectRequest request = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(batch.getFilePath())
+                .build();
+        byte[] content;
+        try {
+            content = s3Client.getObjectAsBytes(request).asByteArray();
+        } catch (SdkException e) {
+            //DBは完了なのにS3から取れない=記録とファイルの食い違い。管理者が調べられるようログに残す
+            log.error("監査ログのファイルをS3から取得できませんでした batchId={} key={}", batchId, batch.getFilePath(), e);
+            throw new ExternalServiceException("監査ログのファイルを取得できませんでした");
+        }
+
+        //取得に成功してから記録する。対象の社員はいないので、対象は実行者と同じ
+        auditLogService.record(login.getEmployeeId(), login.getEmployeeId(),
+                AuditResourceType.AUDIT_LOG_EXPORT, batchId, AuditAction.DOWNLOAD);
+
+        String fileName = "audit-log_" + batch.getPeriodStart() + "_" + batch.getPeriodEnd() + ".csv";
+        return new AuditLogBatchFile(fileName, content);
     }
 
     //DBの1行から、返す項目だけを取り出す

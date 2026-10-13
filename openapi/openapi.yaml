@@ -344,14 +344,20 @@ paths:
     get:
       tags: [audit-log-batches]
       summary: 監査ログエクスポート一覧取得
-      description: 給与明細・評価データの閲覧/DL履歴のエクスポートバッチ一覧を取得する(システム管理者のみ)
+      description: |
+        週次の監査ログエクスポート(バッチ)の結果を、指定した年月について取得する(システム管理者のみ)。
+        対象は、週の開始日(period_start、月曜)が指定した年月に属するバッチで、開始日の昇順で返す(月に4〜5件)。
+        例えば10/26(月)〜11/1(日)の週は、10月に含まれる。該当なしは200で空配列を返す。
       operationId: listAuditLogBatches
       parameters:
         - name: year
           in: query
           required: true
+          description: 4桁の整数
           schema:
             type: integer
+            minimum: 1000
+            maximum: 9999
         - name: month
           in: query
           required: true
@@ -368,6 +374,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AuditLogExportBatch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -377,7 +385,12 @@ paths:
     get:
       tags: [audit-log-batches]
       summary: 監査ログエクスポートダウンロード
-      description: 監査ログエクスポート結果をダウンロードする。成功時、監査ログに記録する。
+      description: |
+        週次の監査ログエクスポート(CSV、UTF-8のBOM付き)をダウンロードする(システム管理者のみ)。
+        statusがCOMPLETED以外(処理中・失敗)のバッチは409を返す。
+        成功時、監査ログに記録する(resource_type=AUDIT_LOG_EXPORT、target_employee_idは実行者と同じ)。
+        失敗した場合(403/404/409/500)は記録しない。
+        DB上は完了なのにS3にファイルがない場合は、500を返す。
       operationId: downloadAuditLogBatch
       parameters:
         - name: batchId
@@ -388,9 +401,14 @@ paths:
             format: int64
       responses:
         "200":
-          description: OK
+          description: OK(ファイル名は audit-log_{週の開始日}_{週の終了日}.csv)
+          headers:
+            Content-Disposition:
+              description: attachment; filename="audit-log_2026-10-05_2026-10-11.csv"
+              schema:
+                type: string
           content:
-            text/plain:
+            text/csv:
               schema:
                 type: string
                 format: binary
@@ -400,6 +418,14 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          description: ファイルを取得できなかった(DBは完了だが、S3にファイルがない場合など)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
 components:
   parameters:
