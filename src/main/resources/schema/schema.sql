@@ -34,3 +34,30 @@ CREATE TABLE IF NOT EXISTS salary_slip (
     uploaded_at     TIMESTAMP NOT NULL DEFAULT now(),
     UNIQUE (employee_id, pay_month)
 );
+
+-- 監査ログ本体テーブル（給与明細のダウンロード・登録・削除と、監査ログのダウンロードを記録する）
+CREATE TABLE IF NOT EXISTS audit_log (
+    id                  BIGSERIAL PRIMARY KEY,
+    actor_employee_id   BIGINT NOT NULL REFERENCES employee(id),   -- 操作した人
+    target_employee_id  BIGINT NOT NULL REFERENCES employee(id),   -- 操作された対象の社員(監査ログのダウンロードは操作者と同じ値)
+    resource_type       VARCHAR(30) NOT NULL CHECK (resource_type IN ('SALARY_SLIP', 'AUDIT_LOG_EXPORT')),
+    resource_id         BIGINT NOT NULL,                           -- 給与明細ID または エクスポートバッチID(FK制約なしの緩い参照)
+    action              VARCHAR(20) NOT NULL CHECK (action IN ('DOWNLOAD', 'CREATE', 'DELETE')),
+    occurred_at         TIMESTAMP NOT NULL DEFAULT now()
+);
+
+-- 週次バッチが「期間を指定して」ログを集めるため、発生日時で検索しやすくしておく
+CREATE INDEX IF NOT EXISTS idx_audit_log_occurred_at ON audit_log (occurred_at);
+
+-- 監査ログの週次エクスポートバッチ管理テーブル（1週間(月曜〜日曜)分で1行。外部キーなし）
+CREATE TABLE IF NOT EXISTS audit_log_export_batch (
+    id            BIGSERIAL PRIMARY KEY,
+    period_start  DATE NOT NULL UNIQUE,                            -- 週の開始日(月曜)。同じ週のバッチが重複しないようUNIQUE
+    period_end    DATE NOT NULL,                                   -- 週の終了日(日曜)
+    status        VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED')),
+    record_count  INT,                                             -- 対象のログ件数(0件の週は0)
+    file_path     VARCHAR(255),                                    -- S3オブジェクトキー(完了後にセット)
+    error_message VARCHAR(500),                                    -- FAILEDのときの原因(失敗したときだけセット)
+    created_at    TIMESTAMP NOT NULL DEFAULT now(),
+    completed_at  TIMESTAMP
+);

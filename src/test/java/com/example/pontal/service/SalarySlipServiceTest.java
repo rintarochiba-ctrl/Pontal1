@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -35,6 +36,8 @@ import com.example.pontal.exception.ConflictException;
 import com.example.pontal.exception.ForbiddenException;
 import com.example.pontal.exception.NotFoundException;
 import com.example.pontal.exception.ValidationException;
+import com.example.pontal.enums.AuditAction;
+import com.example.pontal.enums.AuditResourceType;
 import com.example.pontal.mapper.SalarySlipMapper;
 
 import software.amazon.awssdk.core.ResponseBytes;
@@ -45,8 +48,9 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-//SalarySlipServiceの単体テスト。Mapper・S3・EmployeeServiceはモックに差し替え、DBやAWSには繋がない
-//特に「権限が無いときは、DBにもS3にも触れずに403で止まる」ことを確認する
+//SalarySlipServiceの単体テスト。Mapper・S3・EmployeeService・AuditLogServiceはモックに差し替え、DBやAWSには繋がない
+//特に「権限が無いときは、DBにもS3にも触れずに403で止まる」ことと、
+//「監査ログは、操作が成功したときだけ記録される」ことを確認する
 @ExtendWith(MockitoExtension.class)
 class SalarySlipServiceTest {
 
@@ -58,6 +62,9 @@ class SalarySlipServiceTest {
 
     @Mock
     private EmployeeService employeeService;//ログイン社員の特定は、社員側のテストで確認済みなのでモックにする
+
+    @Mock
+    private AuditLogService auditLogService;//監査ログの記録。ここでは「正しい引数で呼ばれたか」だけを確認する
 
     @InjectMocks
     private SalarySlipService salarySlipService;
@@ -102,6 +109,7 @@ class SalarySlipServiceTest {
                 .isInstanceOf(ForbiddenException.class);
         verifyNoInteractions(salarySlipMapper);//DBにも
         verifyNoInteractions(s3Client);//S3にも触れない
+        verifyNoInteractions(auditLogService);//失敗した操作は記録しない
     }
 
     // payMonthはS3のパスの一部になるので、YYYY-MM(月は01〜12)以外は400で止める
@@ -112,9 +120,10 @@ class SalarySlipServiceTest {
 
         assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 4L, invalidPayMonth, false, pdf()))
                 .isInstanceOf(ValidationException.class);
-        //不正な値は、DBにもS3にも届かない
+        //不正な値は、DBにもS3にも、監査ログにも、届かない
         verifyNoInteractions(salarySlipMapper);
         verifyNoInteractions(s3Client);
+        verifyNoInteractions(auditLogService);
     }
 
     @Test
@@ -137,6 +146,7 @@ class SalarySlipServiceTest {
                 .isInstanceOf(ValidationException.class);
         verifyNoInteractions(salarySlipMapper);
         verifyNoInteractions(s3Client);//PDF以外はS3に保存しない
+        verifyNoInteractions(auditLogService);
     }
 
     @Test
@@ -169,19 +179,6 @@ class SalarySlipServiceTest {
         //権限が無い人には、ファイルの不備(400)ではなく、先に403を返す
         assertThatThrownBy(() -> salarySlipService.upload("sub-member", 4L, "2026-10", false, notPdf))
                 .isInstanceOf(ForbiddenException.class);
-    }
-
-    @Test
-    void upload_throws404_whenTargetEmployeeDoesNotExist() {
-        loginAsHr();
-        //アップロード先の社員が、存在しない(または論理削除済み)場合
-        when(employeeService.getDetail(999L)).thenThrow(new NotFoundException("社員が見つかりません"));
-
-        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 999L, "2026-10", false, pdf()))
-                .isInstanceOf(NotFoundException.class);
-        //存在しない社員の分は、DBにもS3にも保存しない
-        verifyNoInteractions(salarySlipMapper);
-        verifyNoInteractions(s3Client);
     }
 
     // 年月から、社員別のS3のパスが作られる(salary-slips/employee-{社員ID}/{年}/{月}.pdf)
@@ -219,6 +216,19 @@ class SalarySlipServiceTest {
     }
 
     @Test
+    void upload_throws404_whenTargetEmployeeDoesNotExist() {
+        loginAsHr();
+        //アップロード先の社員が、存在しない(または論理削除済み)場合
+        when(employeeService.getDetail(999L)).thenThrow(new NotFoundException("社員が見つかりません"));
+
+        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 999L, "2026-10", false, pdf()))
+                .isInstanceOf(NotFoundException.class);
+        //存在しない社員の分は、DBにもS3にも保存しない
+        verifyNoInteractions(salarySlipMapper);
+        verifyNoInteractions(s3Client);
+    }
+
+    @Test
     void upload_throws409_whenAlreadyExistsAndNoOverwrite() {
         loginAsHr();
         when(salarySlipMapper.countByEmployeeAndMonth(4L, "2026-10")).thenReturn(1);
@@ -226,6 +236,19 @@ class SalarySlipServiceTest {
         assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 4L, "2026-10", false, pdf()))
                 .isInstanceOf(ConflictException.class);
         verifyNoInteractions(s3Client);//409で止まるときは、S3に何も書かない
+        verifyNoInteractions(auditLogService);//記録もしない
+    }
+
+    @Test
+    void upload_doesNotRecordAuditLog_whenS3SaveFails() {
+        loginAsHr();
+        when(salarySlipMapper.countByEmployeeAndMonth(4L, "2026-10")).thenReturn(0);
+        doThrow(new RuntimeException("S3 error")).when(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+
+        assertThatThrownBy(() -> salarySlipService.upload("sub-hr", 4L, "2026-10", false, pdf()))
+                .isInstanceOf(RuntimeException.class);
+        verify(salarySlipMapper, never()).insert(anyLong(), anyString(), anyString(), anyLong());//DBにも登録しない
+        verifyNoInteractions(auditLogService);//S3の保存が失敗したら、記録もしない
     }
 
     @Test
@@ -247,6 +270,8 @@ class SalarySlipServiceTest {
         assertThat(result.getId()).isEqualTo(7L);
         assertThat(result.getEmployeeId()).isEqualTo(4L);
         assertThat(result.getPayMonth()).isEqualTo("2026-10");
+        //監査ログ: 操作した人=HR管理者(1)、対象=明細の持ち主(4)、登録した明細(7)、CREATE
+        verify(auditLogService).record(1L, 4L, AuditResourceType.SALARY_SLIP, 7L, AuditAction.CREATE);
     }
 
     @Test
@@ -259,6 +284,8 @@ class SalarySlipServiceTest {
 
         verify(salarySlipMapper).updateFilePath(4L, "2026-10", "salary-slips/employee-4/2026/10.pdf", 1L);
         verify(salarySlipMapper, never()).insert(anyLong(), anyString(), anyString(), anyLong());
+        //上書きも「アップロードした」操作なので、CREATEとして記録される
+        verify(auditLogService).record(1L, 4L, AuditResourceType.SALARY_SLIP, 7L, AuditAction.CREATE);
     }
 
     // ---------- listByEmployee (API009) ----------
@@ -300,6 +327,7 @@ class SalarySlipServiceTest {
         assertThatThrownBy(() -> salarySlipService.download("sub-member", 99L))
                 .isInstanceOf(NotFoundException.class);
         verifyNoInteractions(s3Client);
+        verifyNoInteractions(auditLogService);
     }
 
     @Test
@@ -311,6 +339,7 @@ class SalarySlipServiceTest {
                 .isInstanceOf(ForbiddenException.class);
         verify(salarySlipMapper, never()).findFilePathById(anyLong());//ファイルの場所も調べない
         verifyNoInteractions(s3Client);//S3にも触れない
+        verifyNoInteractions(auditLogService);//権限エラーは記録しない
     }
 
     @Test
@@ -329,6 +358,20 @@ class SalarySlipServiceTest {
         verify(s3Client).getObjectAsBytes(captor.capture());
         assertThat(captor.getValue().bucket()).isEqualTo("test-bucket");
         assertThat(captor.getValue().key()).isEqualTo("salary-slips/employee-4/2026/10.pdf");
+        //監査ログ: 操作した人=本人(4)、対象=持ち主(4)、明細(5)、DOWNLOAD
+        verify(auditLogService).record(4L, 4L, AuditResourceType.SALARY_SLIP, 5L, AuditAction.DOWNLOAD);
+    }
+
+    @Test
+    void download_doesNotRecordAuditLog_whenS3ReadFails() {
+        loginAsMember();//id=4
+        when(salarySlipMapper.findEmployeeIdById(5L)).thenReturn(4L);
+        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/employee-4/2026/10.pdf");
+        when(s3Client.getObjectAsBytes(any(GetObjectRequest.class))).thenThrow(new RuntimeException("S3 error"));
+
+        assertThatThrownBy(() -> salarySlipService.download("sub-member", 5L))
+                .isInstanceOf(RuntimeException.class);
+        verifyNoInteractions(auditLogService);//ダウンロードできなかったのに、記録は残さない
     }
 
     @Test
@@ -341,6 +384,8 @@ class SalarySlipServiceTest {
                 .thenReturn(ResponseBytes.fromByteArray(GetObjectResponse.builder().build(), bytes));
 
         assertThat(salarySlipService.download("sub-hr", 5L)).isEqualTo(bytes);
+        //操作した人=HR管理者(1)、対象=明細の持ち主(4)。2人は別人として記録される
+        verify(auditLogService).record(1L, 4L, AuditResourceType.SALARY_SLIP, 5L, AuditAction.DOWNLOAD);
     }
 
     @Test
@@ -352,6 +397,7 @@ class SalarySlipServiceTest {
         assertThatThrownBy(() -> salarySlipService.download("sub-member", 5L))
                 .isInstanceOf(NotFoundException.class);
         verifyNoInteractions(s3Client);
+        verifyNoInteractions(auditLogService);
     }
 
     // ---------- delete (API012) ----------
@@ -365,6 +411,7 @@ class SalarySlipServiceTest {
         //権限チェックが先なので、DBも調べない(その明細が存在するかを教えない)
         verifyNoInteractions(salarySlipMapper);
         verifyNoInteractions(s3Client);
+        verifyNoInteractions(auditLogService);
     }
 
     @Test
@@ -376,21 +423,38 @@ class SalarySlipServiceTest {
                 .isInstanceOf(NotFoundException.class);
         verifyNoInteractions(s3Client);
         verify(salarySlipMapper, never()).deleteById(anyLong());
+        verifyNoInteractions(auditLogService);
     }
 
     @Test
-    void delete_removesS3ObjectThenDbRow() {
-        loginAsHr();
+    void delete_removesS3ObjectThenDbRow_thenRecordsAuditLog() {
+        loginAsHr();//id=1
         when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/employee-4/2026/10.pdf");
+        when(salarySlipMapper.findEmployeeIdById(5L)).thenReturn(4L);//削除前に調べた持ち主
 
         salarySlipService.delete("sub-hr", 5L);
 
         ArgumentCaptor<DeleteObjectRequest> captor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-        InOrder order = inOrder(s3Client, salarySlipMapper);
+        InOrder order = inOrder(s3Client, salarySlipMapper, auditLogService);
         order.verify(s3Client).deleteObject(captor.capture());//先にS3のファイルを消し
-        order.verify(salarySlipMapper).deleteById(5L);//そのあとDBの行を消す
+        order.verify(salarySlipMapper).deleteById(5L);//次にDBの行を消し
+        //最後に、削除が成功した後で記録する(操作した人=HR管理者(1)、対象=持ち主(4)、明細(5)、DELETE)
+        order.verify(auditLogService).record(1L, 4L, AuditResourceType.SALARY_SLIP, 5L, AuditAction.DELETE);
         assertThat(captor.getValue().bucket()).isEqualTo("test-bucket");
         assertThat(captor.getValue().key()).isEqualTo("salary-slips/employee-4/2026/10.pdf");
+    }
+
+    @Test
+    void delete_doesNotRecordAuditLog_whenS3DeleteFails() {
+        loginAsHr();
+        when(salarySlipMapper.findFilePathById(5L)).thenReturn("salary-slips/employee-4/2026/10.pdf");
+        when(salarySlipMapper.findEmployeeIdById(5L)).thenReturn(4L);
+        doThrow(new RuntimeException("S3 error")).when(s3Client).deleteObject(any(DeleteObjectRequest.class));
+
+        assertThatThrownBy(() -> salarySlipService.delete("sub-hr", 5L))
+                .isInstanceOf(RuntimeException.class);
+        verify(salarySlipMapper, never()).deleteById(anyLong());//DBの行も消さない
+        verifyNoInteractions(auditLogService);//削除できていないのに、削除の記録は残さない
     }
 
     // ---------- listHistory (API013) ----------

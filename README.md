@@ -78,6 +78,30 @@ docker compose up -d     # 空の DB が作られ 初期化スクリプトが走
 docker exec -it pontal1_postgres psql -U postgres -d pontal
 ```
 
+## 監査ログの週次エクスポート
+
+給与明細の操作 (ダウンロード・アップロード・削除) は 成功したあとに `audit_log` へ記録されます
+その監査ログを 毎週自動で CSV にして S3 に保存します (UTF-8 の BOM 付きで Excel でそのまま開けます)
+
+| 項目 | 内容 |
+|---|---|
+| 実行時刻 | 毎週月曜の 3:00 (日本時間) |
+| 対象 | 先週 (月曜 0:00 以上 日曜 24:00 未満) の監査ログ |
+| 保存先 | S3 の `audit-logs/{年}/{月}/{月曜}_{日曜}.csv` (例 `audit-logs/2026/10/2026-10-05_2026-10-11.csv`) |
+| 結果の記録 | `audit_log_export_batch` (週の開始日ごとに 1 行 状態は `PROCESSING` `COMPLETED` `FAILED`) |
+
+- 完了済みの週は 2 回目以降はスキップします
+- 失敗 (`FAILED`) や処理中のままの週は 次に `exportWeek` を呼んだときに 同じ行でやり直します
+- 失敗した週は 翌週の自動実行では拾われません (翌週は「その先週」だけを処理するため) 手で `AuditLogExportService.exportWeek(月曜の日付)` を呼びます
+- ログが 0 件の週も 空のファイルを作って `record_count = 0` で記録します
+- 実行時刻を変えたいとき (動作確認など) は `.env` に cron 式を足してアプリを作り直します (確認が終わったら消します)
+
+```
+AUDIT_LOG_EXPORT_CRON=0 */2 * * * *   # 2 分ごと (秒 分 時 日 月 曜日)
+```
+
+- アプリのコンテナは `TZ: Asia/Tokyo` で動かしています UTC のままだと DB の `now()` で入る日時が 9 時間ずれて 週の区切りとずれるためです
+
 ## 動作確認 (Postman / curl)
 
 API は Cognito のアクセストークンが必要です (`Authorization: Bearer <トークン>`)
@@ -138,7 +162,7 @@ mvn clean test                        # 古いビルドの影響を消してや�
 | `.../mapper` と `src/main/resources/mapper` | DB アクセス (Mapper と SQL) |
 | `.../dto` | リクエスト・レスポンスのデータの入れ物 |
 | `.../exception` | 例外と エラーレスポンスへの変換 |
-| `.../config` | Spring の設定 (認証・CORS・Cognito・MyBatis) |
+| `.../config` | Spring の設定 (認証・CORS・Cognito・MyBatis・スケジューラ) |
 | `src/main/resources/schema` | テーブル定義 (`schema.sql`) |
 | `docker/` | 開発用ダミーデータ |
 | `docs/` | ER 図 |

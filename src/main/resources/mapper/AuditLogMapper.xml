@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.pontal.mapper.AuditLogMapper">
+
+    <!-- 監査ログの記録(occurred_atはDEFAULT now()で自動) -->
+    <insert id="insert">
+        INSERT INTO audit_log (actor_employee_id, target_employee_id, resource_type, resource_id, action)
+        VALUES (#{actorEmployeeId}, #{targetEmployeeId}, #{resourceType}, #{resourceId}, #{action})
+    </insert>
+
+        <!-- 週次エクスポート用。期間内のログを、操作者・対象社員の名前つきで取得(startAt以上、endAt未満) -->
+    <select id="selectForExport" resultType="com.example.pontal.dto.AuditLogExportRow">
+        SELECT a.occurred_at,
+               a.actor_employee_id,
+               act.name AS actor_name,
+               a.target_employee_id,
+               tgt.name AS target_name,
+               a.resource_type,
+               a.resource_id,
+               a.action
+        FROM audit_log a
+        JOIN employee act ON act.id = a.actor_employee_id
+        JOIN employee tgt ON tgt.id = a.target_employee_id
+        WHERE a.occurred_at &gt;= #{startAt}
+          AND a.occurred_at &lt; #{endAt}
+        ORDER BY a.occurred_at, a.id
+    </select>
+
+</mapper>
