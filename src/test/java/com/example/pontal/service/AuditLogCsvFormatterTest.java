@@ -69,7 +69,7 @@ class AuditLogCsvFormatterTest {
 
     @Test
     void escape_quotesValueContainingComma() {
-        assertThat(AuditLogCsvFormatter.escape("佐藤,花子")).isEqualTo("佐藤,花子");
+        assertThat(AuditLogCsvFormatter.escape("佐藤,花子")).isEqualTo("\"佐藤,花子\"");
     }
 
     @Test

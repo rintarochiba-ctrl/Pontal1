@@ -18,12 +18,12 @@ jobs:
       # リポジトリのコードを取得する
       - uses: actions/checkout@v4
 
-      # Java 17を入れる(pom.xmlのjava.versionに合わせる)
+      # Java 17を入れる
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-          cache: maven # 依存ライブラリを、次回以降に使い回して速くする
+          cache: maven
 
       # テストを実行する(-Bは、CIのログ向けの出力にするオプション)
       - run: mvn -B test
