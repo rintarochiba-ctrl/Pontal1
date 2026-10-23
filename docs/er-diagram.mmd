@@ -4,6 +4,8 @@ erDiagram
     employee ||--o{ salary_upload_batch_error : "may appear in"
     employee ||--o{ audit_log : "acts as (actor)"
     employee ||--o{ audit_log : "is target of"
+    employee ||--o{ announcement : "posts (sender)"
+    employee ||--o{ announcement : "is addressed by (target)"
     salary_upload_batch ||--o{ salary_slip : "contains"
     salary_upload_batch ||--o{ salary_upload_batch_error : "contains"
 
@@ -79,4 +81,20 @@ erDiagram
         varchar file_path
         timestamp created_at
         timestamp completed_at
+    }
+
+    announcement {
+        bigint id PK
+        varchar title
+        varchar body
+        varchar category
+        boolean is_important
+        bigint sender_employee_id FK
+        varchar sender_department
+        varchar target_type
+        varchar target_department
+        bigint target_employee_id FK
+        timestamp created_at
+        timestamp updated_at
+        boolean is_delete
     }
