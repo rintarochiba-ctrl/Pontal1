@@ -91,6 +91,12 @@
             <optional>true</optional>
         </dependency>
 
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.28.11</version>
+        </dependency>
+
         <!-- Cognitoのユーザー作成・無効化(Admin API)用 -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>

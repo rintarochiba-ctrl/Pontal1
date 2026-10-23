@@ -127,88 +127,88 @@ class EmployeeServiceTest {
                 .isInstanceOf(NotFoundException.class);
     }
 
-    // ---------- search (API004) ----------
+    // ---------- list (API004) ----------
 
     @Test
-    void search_throws400_whenPageIsNegative() {
-        assertThatThrownBy(() -> employeeService.search(-1, 20, null))
+    void list_throws400_whenPageIsNegative() {
+        assertThatThrownBy(() -> employeeService.list(-1, 20, null))
                 .isInstanceOf(ValidationException.class);
         verifyNoInteractions(employeeMapper);//不正な値ならDBに問い合わせない
     }
 
     @Test
-    void search_throws400_whenSizeIsZero() {
-        assertThatThrownBy(() -> employeeService.search(0, 0, null))
+    void list_throws400_whenSizeIsZero() {
+        assertThatThrownBy(() -> employeeService.list(0, 0, null))
                 .isInstanceOf(ValidationException.class);
     }
 
     @Test
-    void search_throws400_whenSizeIsOver100() {
-        assertThatThrownBy(() -> employeeService.search(0, 101, null))
+    void list_throws400_whenSizeIsOver100() {
+        assertThatThrownBy(() -> employeeService.list(0, 101, null))
                 .isInstanceOf(ValidationException.class);
     }
 
     @Test
-    void search_passesOffsetAndKeywordToMapper() {
+    void list_passesOffsetAndKeywordToMapper() {
         when(employeeMapper.selectByKeyword("人事", 2, 2L)).thenReturn(List.of(new EmployeeSummary()));
         when(employeeMapper.countByKeyword("人事")).thenReturn(5);
 
-        EmployeePage result = employeeService.search(1, 2, "人事");//page=1,size=2 → offset=2
+        EmployeePage result = employeeService.list(1, 2, "人事");//page=1,size=2 → offset=2
 
         assertThat(result.getItems()).hasSize(1);
         assertThat(result.getTotalCount()).isEqualTo(5);
     }
 
     @Test
-    void search_firstPage_hasNextButNoPrev() {
+    void list_firstPage_hasNextButNoPrev() {
         when(employeeMapper.selectByKeyword(any(), anyInt(), anyLong())).thenReturn(List.of());
         when(employeeMapper.countByKeyword(any())).thenReturn(5);
 
-        EmployeePage result = employeeService.search(0, 2, null);//5件を2件ずつ → 0,1,2ページ
+        EmployeePage result = employeeService.list(0, 2, null);//5件を2件ずつ → 0,1,2ページ
 
         assertThat(result.getNext()).isEqualTo(1);
         assertThat(result.getPrev()).isNull();
     }
 
     @Test
-    void search_middlePage_hasNextAndPrev() {
+    void list_middlePage_hasNextAndPrev() {
         when(employeeMapper.selectByKeyword(any(), anyInt(), anyLong())).thenReturn(List.of());
         when(employeeMapper.countByKeyword(any())).thenReturn(5);
 
-        EmployeePage result = employeeService.search(1, 2, null);
+        EmployeePage result = employeeService.list(1, 2, null);
 
         assertThat(result.getNext()).isEqualTo(2);
         assertThat(result.getPrev()).isEqualTo(0);
     }
 
     @Test
-    void search_lastPage_hasNoNext() {
+    void list_lastPage_hasNoNext() {
         when(employeeMapper.selectByKeyword(any(), anyInt(), anyLong())).thenReturn(List.of());
         when(employeeMapper.countByKeyword(any())).thenReturn(5);
 
-        EmployeePage result = employeeService.search(2, 2, null);
+        EmployeePage result = employeeService.list(2, 2, null);
 
         assertThat(result.getNext()).isNull();
         assertThat(result.getPrev()).isEqualTo(1);
     }
 
     @Test
-    void search_outOfRangePage_prevIsClampedToLastPage() {
+    void list_outOfRangePage_prevIsClampedToLastPage() {
         when(employeeMapper.selectByKeyword(any(), anyInt(), anyLong())).thenReturn(List.of());
         when(employeeMapper.countByKeyword(any())).thenReturn(5);
 
-        EmployeePage result = employeeService.search(99, 2, null);//最終ページは2
+        EmployeePage result = employeeService.list(99, 2, null);//最終ページは2
 
         assertThat(result.getNext()).isNull();
         assertThat(result.getPrev()).isEqualTo(2);//98ではなく最終ページに丸められる
     }
 
     @Test
-    void search_noResults_prevIsNotNegative() {
+    void list_noResults_prevIsNotNegative() {
         when(employeeMapper.selectByKeyword(any(), anyInt(), anyLong())).thenReturn(List.of());
         when(employeeMapper.countByKeyword(any())).thenReturn(0);
 
-        EmployeePage result = employeeService.search(3, 20, "zzz");
+        EmployeePage result = employeeService.list(3, 20, "zzz");
 
         assertThat(result.getPrev()).isEqualTo(0);
     }
