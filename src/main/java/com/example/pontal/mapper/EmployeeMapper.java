@@ -40,4 +40,11 @@ public interface EmployeeMapper {
     //社員削除で使用、論理削除(is_delete=true)して更新した行数を返す(0なら存在しない/削除済み)
     int softDeleteById(@Param("id") Long id);
 
+    //お知らせの宛先(部署)の選択肢で使用、重複なしの部署名の一覧(部署のマスタが無いため、社員の部署から作る)
+    //論理削除済みの社員と、部署が未設定(null・空)の社員は、対象外
+    List<String> selectDepartments();
+
+    //お知らせの宛先(部署)の存在確認で使用、その部署に所属する(論理削除されていない)社員の数
+    int countByDepartment(@Param("department") String department);
+
 }
