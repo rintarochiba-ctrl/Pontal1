@@ -191,6 +191,27 @@ class AnnouncementControllerTest {
     }
 
     @Test
+    void detail_returnsTargetDepartmentAndEmployeeId_forEditForm() throws Exception {
+        AnnouncementDetail personal = detail(7L);
+        personal.setTargetType("EMPLOYEE");
+        personal.setTargetLabel("鈴木一郎");
+        personal.setTargetEmployeeId(3L);
+        AnnouncementDetail dept = detail(8L);
+        dept.setTargetType("DEPARTMENT");
+        dept.setTargetLabel("営業部");
+        dept.setTargetDepartment("営業部");
+        when(announcementService.get("sub-user", 7L)).thenReturn(personal);
+        when(announcementService.get("sub-user", 8L)).thenReturn(dept);
+
+        mockMvc.perform(get("/api/announcements/7").with(user()))
+                .andExpect(jsonPath("$.targetEmployeeId").value(3))
+                .andExpect(jsonPath("$.targetDepartment").doesNotExist());
+        mockMvc.perform(get("/api/announcements/8").with(user()))
+                .andExpect(jsonPath("$.targetDepartment").value("営業部"))
+                .andExpect(jsonPath("$.targetEmployeeId").doesNotExist());
+    }
+
+    @Test
     void detail_returns404_whenNotFoundOrInvisible() throws Exception {
         when(announcementService.get("sub-user", 99L)).thenThrow(new NotFoundException("お知らせが見つかりません"));
 

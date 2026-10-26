@@ -228,6 +228,9 @@ public class AnnouncementService {
         detail.setUpdatedAt(a.getUpdatedAt());
         detail.setCanEdit(canManage(login));
         detail.setCanDelete(canDelete(login));
+        //宛先そのもの(編集画面のフォームに、保存済みの宛先を最初から入れるため)
+        detail.setTargetDepartment(a.getTargetDepartment());
+        detail.setTargetEmployeeId(a.getTargetEmployeeId());
         return detail;
     }
 

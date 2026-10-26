@@ -283,6 +283,31 @@ class AnnouncementServiceTest {
     }
 
     @Test
+    void get_returnsTargetDepartmentAndEmployeeId_forEditForm() {
+        //編集画面の、フォームに最初から入れる宛先。表示名(targetLabel)とは別に、部署名・社員IDそのものを返す
+        Announcement all = saved(5L, "ALL");
+        Announcement dept = saved(6L, "DEPARTMENT");
+        dept.setTargetDepartment("営業部");
+        Announcement personal = saved(7L, "EMPLOYEE");
+        personal.setTargetEmployeeId(3L);
+        personal.setTargetEmployeeName("鈴木一郎");
+        when(announcementMapper.findVisibleById(5L, "all", 3L, "営業部")).thenReturn(all);
+        when(announcementMapper.findVisibleById(6L, "all", 3L, "営業部")).thenReturn(dept);
+        when(announcementMapper.findVisibleById(7L, "all", 3L, "営業部")).thenReturn(personal);
+
+        AnnouncementDetail forAll = service.get("sub-3", 5L);
+        AnnouncementDetail forDept = service.get("sub-3", 6L);
+        AnnouncementDetail forPersonal = service.get("sub-3", 7L);
+
+        assertThat(forAll.getTargetDepartment()).isNull();
+        assertThat(forAll.getTargetEmployeeId()).isNull();
+        assertThat(forDept.getTargetDepartment()).isEqualTo("営業部");
+        assertThat(forDept.getTargetEmployeeId()).isNull();
+        assertThat(forPersonal.getTargetDepartment()).isNull();
+        assertThat(forPersonal.getTargetEmployeeId()).isEqualTo(3L);
+    }
+
+    @Test
     void get_throwsNotFound_whenInvisibleOrMissing() {
         //見られない・存在しない・削除済みは、どれもMapperがnullを返す → 404
         assertThatThrownBy(() -> service.get("sub-3", 99L)).isInstanceOf(NotFoundException.class);

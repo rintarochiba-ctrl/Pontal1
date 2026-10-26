@@ -937,6 +937,15 @@ components:
             canDelete:
               type: boolean
               description: ログイン中の人が削除できるか(システム管理者のみ)
+            targetDepartment:
+              type: string
+              nullable: true
+              description: 宛先の部署名(targetTypeがDEPARTMENTのときだけ。編集画面のフォーム用。表示名はtargetLabel)
+            targetEmployeeId:
+              type: integer
+              format: int64
+              nullable: true
+              description: 宛先の社員ID(targetTypeがEMPLOYEEのときだけ。編集画面のフォーム用。表示名はtargetLabel)
 
     AnnouncementRequest:
       type: object

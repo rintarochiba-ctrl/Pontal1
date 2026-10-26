@@ -9,6 +9,10 @@ public class AnnouncementDetail extends AnnouncementItem {
     //ログイン中の人が編集・削除できるか(画面のボタン表示用。実際の権限チェックはAPI側で行う)
     private boolean canEdit;
     private boolean canDelete;
+    //宛先そのもの(編集画面の、フォームに最初から入れるため。表示名のtargetLabelは、一覧・詳細の表示用)
+    //targetTypeがDEPARTMENTのときだけ部署名、EMPLOYEEのときだけ社員ID。それ以外はnull
+    private String targetDepartment;
+    private Long targetEmployeeId;
 
     public String getBody() { return body; }
     public void setBody(String body) { this.body = body; }
@@ -21,4 +25,10 @@ public class AnnouncementDetail extends AnnouncementItem {
 
     public boolean getCanDelete() { return canDelete; }
     public void setCanDelete(boolean canDelete) { this.canDelete = canDelete; }
+
+    public String getTargetDepartment() { return targetDepartment; }
+    public void setTargetDepartment(String targetDepartment) { this.targetDepartment = targetDepartment; }
+
+    public Long getTargetEmployeeId() { return targetEmployeeId; }
+    public void setTargetEmployeeId(Long targetEmployeeId) { this.targetEmployeeId = targetEmployeeId; }
 }
