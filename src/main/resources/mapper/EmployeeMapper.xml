@@ -74,8 +74,9 @@
         WHERE email = #{email}
     </select>
 
-    <!-- 社員登録(INSERT ... RETURNING idで、登録した行のidを受け取る) -->
-    <select id="insert" resultType="long">
+    <!-- 社員登録(INSERT ... RETURNING idで、登録した行のidを受け取る)
+         selectとして書いているため、flushCache="true"が無いと、同じ条件で2回呼んだときに2回目はSQLを実行しない -->
+    <select id="insert" resultType="long" flushCache="true">
         INSERT INTO employee (name, email, cognito_sub, department, position,
                               join_date, is_system_admin, is_hr_admin)
         VALUES (#{req.name}, #{req.email}, #{cognitoSub}, #{req.department}, #{req.position},

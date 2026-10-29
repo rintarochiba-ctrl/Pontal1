@@ -31,6 +31,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://pontal1_postgres:5432/pontal
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
+      TZ: Asia/Tokyo
     depends_on:
       postgres:
         condition: service_healthy

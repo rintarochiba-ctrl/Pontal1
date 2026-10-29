@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.pontal.enums.AuditAction;
+import com.example.pontal.enums.AuditResourceType;
 import com.example.pontal.dto.LoginEmployee;
 import com.example.pontal.dto.SalarySlipSummary;
 import com.example.pontal.dto.SalarySlipUploadHistory;
@@ -31,6 +33,7 @@ public class SalarySlipService {
     private final SalarySlipMapper salarySlipMapper;
     private final S3Client s3Client;
     private final EmployeeService employeeService;
+    private final AuditLogService auditLogService;
 
     // application.propertiesのaws.s3.bucketの値を注入(.envのAWS_S3_BUCKETが実体)
     @Value("${aws.s3.bucket}")
@@ -38,10 +41,11 @@ public class SalarySlipService {
 
     //コンストラクタでDIにより部品を受け取る
     public SalarySlipService(SalarySlipMapper salarySlipMapper, S3Client s3Client,
-        EmployeeService employeeService){
+        EmployeeService employeeService, AuditLogService auditLogService){
         this.salarySlipMapper = salarySlipMapper;
         this.s3Client = s3Client;
         this.employeeService = employeeService;
+        this.auditLogService = auditLogService;
     }
 
     //給与明細アップロード処理(HR管理者のみ)
@@ -74,6 +78,7 @@ public class SalarySlipService {
         }
 
         String filePath = "salary-slips/employee-" + employeeId + "/" + payMonth.replace("-", "/") + ".pdf";
+
         //AWS SDKのPutObjectRequestクラスはS3への保存リクエスト作成に使用
         PutObjectRequest request = PutObjectRequest.builder()
                 .bucket(bucketName) //保存先バケット
@@ -91,6 +96,9 @@ public class SalarySlipService {
 
         // 登録/更新した行のIDを取得してレスポンスを組み立てる
         Long id = salarySlipMapper.findIdByEmployeeAndMonth(employeeId, payMonth);
+
+        auditLogService.record(uploadedBy, employeeId, AuditResourceType.SALARY_SLIP, id, AuditAction.CREATE);
+
         // 登録/更新した結果を返す(明細ID,明細の対象社員ID,対象年月)
         SalarySlipUploadResult result = new SalarySlipUploadResult();
         result.setId(id);
@@ -129,6 +137,9 @@ public class SalarySlipService {
                 .build();
         //ファイルはバイト列で取得
         ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(request);
+
+        auditLogService.record(login.getEmployeeId(), ownerEmployeeId, AuditResourceType.SALARY_SLIP, slipId, AuditAction.DOWNLOAD);
+
         return response.asByteArray();
     }
 
@@ -143,6 +154,9 @@ public class SalarySlipService {
         if (filePath == null) {
             throw new NotFoundException("給与明細が見つかりません");
         }
+        //削除する前に対象者のIDをownerEmployeeId変数に控える
+        Long ownerEmployeeId = salarySlipMapper.findEmployeeIdById(slipId);
+
         //DeleteObjectRequestクラスでS3への削除リクエストを作成
         DeleteObjectRequest request = DeleteObjectRequest.builder()
                 .bucket(bucketName)
@@ -152,6 +166,9 @@ public class SalarySlipService {
         s3Client.deleteObject(request);
         //DBから対象明細を削除
         salarySlipMapper.deleteById(slipId);
+
+        //削除後、ログへ記録
+        auditLogService.record(login.getEmployeeId(), ownerEmployeeId, AuditResourceType.SALARY_SLIP, slipId, AuditAction.DELETE);
     }
 
     //アップロード履歴一覧を返す(HR管理者のみ、新しい順)
