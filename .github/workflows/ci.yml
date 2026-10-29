@@ -1,0 +1,29 @@
+name: CI
+
+# PRが作られたとき・更新されたとき、mainに入ったときに動く
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# このワークフローがGitHubに対して持つ権限を、読み取りだけにする(最小権限の原則)
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # GitHubが用意する、Linuxの仮想マシン(Dockerが入っているので、Testcontainersも動く)
+    runs-on: ubuntu-latest
+    steps:
+      # リポジトリのコードを取得する
+      - uses: actions/checkout@v4
+
+      # Java 17を入れる
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      # テストを実行する(-Bは、CIのログ向けの出力にするオプション)
+      - run: mvn -B test
