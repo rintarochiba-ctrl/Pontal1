@@ -3,3 +3,4 @@
 target/
 .mcp.json
 .env
+.env.pass
