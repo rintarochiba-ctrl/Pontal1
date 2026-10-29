@@ -291,4 +291,28 @@ class EmployeeMapperTest {
     void softDeleteById_returnsZero_whenNotFound() {
         assertThat(employeeMapper.softDeleteById(999L)).isEqualTo(0);
     }
+
+    // ---------- selectDepartments / countByDepartment ----------
+
+    @Test
+    void selectDepartments_returnsDistinctDepartments() {
+        //開発部は2人いるが、1つだけ返る(並び順は照合順序に依存するため、確認しない)
+        assertThat(employeeMapper.selectDepartments()).containsExactlyInAnyOrder("開発部", "人事部", "営業部");
+    }
+
+    @Test
+    void selectDepartments_excludesDepartmentOfDeletedEmployees() {
+        employeeMapper.softDeleteById(3L);//営業部は、鈴木だけ
+
+        assertThat(employeeMapper.selectDepartments()).containsExactlyInAnyOrder("開発部", "人事部");
+    }
+
+    @Test
+    void countByDepartment_countsOnlyActiveEmployees() {
+        assertThat(employeeMapper.countByDepartment("開発部")).isEqualTo(2);
+        assertThat(employeeMapper.countByDepartment("存在しない部")).isEqualTo(0);
+
+        employeeMapper.softDeleteById(4L);
+        assertThat(employeeMapper.countByDepartment("開発部")).isEqualTo(1);
+    }
 }

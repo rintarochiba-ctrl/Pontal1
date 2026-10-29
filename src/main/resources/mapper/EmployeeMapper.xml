@@ -100,4 +100,22 @@
           AND is_delete = FALSE
     </update>
 
+    <!-- 部署の選択肢(重複なし。論理削除済み・部署が未設定の社員は除く。部署のマスタが無いため、社員の部署から作る) -->
+    <select id="selectDepartments" resultType="string">
+        SELECT DISTINCT department
+        FROM employee
+        WHERE is_delete = FALSE
+          AND department IS NOT NULL
+          AND department &lt;&gt; ''
+        ORDER BY department
+    </select>
+
+    <!-- その部署に所属する社員の数(論理削除済みは除く)。お知らせの宛先の部署が、存在するかの確認に使う -->
+    <select id="countByDepartment" resultType="int">
+        SELECT COUNT(*)
+        FROM employee
+        WHERE department = #{department}
+          AND is_delete = FALSE
+    </select>
+
 </mapper>

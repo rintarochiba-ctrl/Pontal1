@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.pontal.mapper.AnnouncementMapper">
+
+    <!-- 「誰に見えるか」の条件(scopeで切り替える)。一覧・件数・詳細で共通。
+         論理削除済みは、どのscopeでも除く -->
+    <sql id="visibleCondition">
+        a.is_delete = FALSE
+        <choose>
+            <!-- システム管理者・HR管理者向け:宛先を問わず全件 -->
+            <when test="scope == 'manage'">
+            </when>
+            <!-- 全員向けだけ -->
+            <when test="scope == 'everyone'">
+                AND a.target_type = 'ALL'
+            </when>
+            <!-- 自分宛ての個人向け + 自分の部署宛て -->
+            <when test="scope == 'mine'">
+                AND ((a.target_type = 'EMPLOYEE' AND a.target_employee_id = #{viewerId})
+                  OR (a.target_type = 'DEPARTMENT' AND a.target_department = #{viewerDepartment}))
+            </when>
+            <!-- all(既定):全員向け + 自分宛ての個人向け + 自分の部署宛て -->
+            <otherwise>
+                AND (a.target_type = 'ALL'
+                  OR (a.target_type = 'EMPLOYEE' AND a.target_employee_id = #{viewerId})
+                  OR (a.target_type = 'DEPARTMENT' AND a.target_department = #{viewerDepartment}))
+            </otherwise>
+        </choose>
+    </sql>
+
+    <!-- 一覧と件数で共通の、全部の条件(見られる範囲 + 種類の絞り込み) -->
+    <sql id="listCondition">
+        <include refid="visibleCondition"/>
+        <if test="category != null and category != ''">
+            AND a.category = #{category}
+        </if>
+    </sql>
+
+    <!-- お知らせ一覧(本文は含めない。個人宛ては、宛先の社員の名前も取る) -->
+    <select id="selectVisible" resultType="com.example.pontal.dto.Announcement">
+        SELECT a.id, a.title, a.category, a.is_important, a.sender_department,
+               a.target_type, a.target_department, a.target_employee_id,
+               te.name AS target_employee_name, a.created_at
+        FROM announcement a
+        LEFT JOIN employee te ON te.id = a.target_employee_id
+        WHERE <include refid="listCondition"/>
+        ORDER BY a.is_important DESC, a.created_at DESC, a.id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <!-- お知らせ一覧の総件数 -->
+    <select id="countVisible" resultType="int">
+        SELECT COUNT(*)
+        FROM announcement a
+        WHERE <include refid="listCondition"/>
+    </select>
+
+    <!-- 詳細(本文つき)。見られる人だけが取れる -->
+    <select id="findVisibleById" resultType="com.example.pontal.dto.Announcement">
+        SELECT a.id, a.title, a.body, a.category, a.is_important,
+               a.sender_employee_id, a.sender_department,
+               a.target_type, a.target_department, a.target_employee_id,
+               te.name AS target_employee_name, a.created_at, a.updated_at
+        FROM announcement a
+        LEFT JOIN employee te ON te.id = a.target_employee_id
+        WHERE a.id = #{id}
+          AND <include refid="visibleCondition"/>
+    </select>
+
+    <!-- 1件取得(宛先を問わない。論理削除済みは除く) -->
+    <select id="findById" resultType="com.example.pontal.dto.Announcement">
+        SELECT a.id, a.title, a.body, a.category, a.is_important,
+               a.sender_employee_id, a.sender_department,
+               a.target_type, a.target_department, a.target_employee_id,
+               te.name AS target_employee_name, a.created_at, a.updated_at
+        FROM announcement a
+        LEFT JOIN employee te ON te.id = a.target_employee_id
+        WHERE a.id = #{id}
+          AND a.is_delete = FALSE
+    </select>
+
+    <!-- お知らせ作成(INSERT ... RETURNING idで、登録した行のidを受け取る)
+         selectとして書いているため、flushCache="true"が無いと、同じ条件で2回呼んだときに2回目はSQLを実行しない -->
+    <select id="insert" resultType="long" flushCache="true">
+        INSERT INTO announcement (title, body, category, is_important,
+                                  sender_employee_id, sender_department,
+                                  target_type, target_department, target_employee_id)
+        VALUES (#{a.title}, #{a.body}, #{a.category}, #{a.isImportant},
+                #{a.senderEmployeeId}, #{a.senderDepartment},
+                #{a.targetType}, #{a.targetDepartment}, #{a.targetEmployeeId})
+        RETURNING id
+    </select>
+
+    <!-- お知らせ編集(論理削除済みは対象外、更新日時も更新)。差出人と作成日時は、変えない -->
+    <update id="update">
+        UPDATE announcement
+        SET title = #{a.title},
+            body = #{a.body},
+            category = #{a.category},
+            is_important = #{a.isImportant},
+            target_type = #{a.targetType},
+            target_department = #{a.targetDepartment},
+            target_employee_id = #{a.targetEmployeeId},
+            updated_at = now()
+        WHERE id = #{id}
+          AND is_delete = FALSE
+    </update>
+
+    <!-- お知らせ削除(論理削除) -->
+    <update id="softDeleteById">
+        UPDATE announcement
+        SET is_delete = TRUE,
+            updated_at = now()
+        WHERE id = #{id}
+          AND is_delete = FALSE
+    </update>
+
+</mapper>
